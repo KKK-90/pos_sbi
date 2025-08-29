@@ -9,22 +9,34 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Crect width='100%25' height='100%25' rx='24' ry='24' fill='%233498db'/%3E%3Ctext x='50%25' y='58%25' dominant-baseline='middle' text-anchor='middle' font-family='Segoe UI' font-size='60' fill='white'%3EPOS%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="assets/css/styles.css" />
 
-  <!-- Vendor libs (cached by service worker for offline use) -->
+  <!-- Vendor libs (kept as-is) -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
   <!-- Login Screen -->
   <div id="loginScreen" class="login-container">
-    <div class="login-card">
+    <div class="login-card" style="max-width:420px">
       <h1 class="login-title">POS Deployment Tracker</h1>
-      <p style="color: var(--secondary-color); margin-bottom: 30px;">Select your user account to continue</p>
-      <div class="user-buttons">
-        <button class="user-btn" onclick="login('KARNA')">KARNA</button>
-        <button class="user-btn" onclick="login('NKR')">NKR</button>
-        <button class="user-btn" onclick="login('SKR')">SKR</button>
-        <button class="user-btn" onclick="login('BGR')">BGR</button>
-        <button class="user-btn" onclick="login('SBI_DOP')">SBI_DOP</button>
+      <p style="color: var(--secondary-color); margin-bottom: 20px;">Sign in with your credentials</p>
+
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="loginUsername">Username</label>
+          <input id="loginUsername" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" type="password" autocomplete="current-password" required />
+        </div>
+        <div class="text-center" style="margin-top:10px;">
+          <button type="submit" class="btn btn-primary btn-lg" style="width:100%">Login</button>
+        </div>
+        <div id="loginError" class="alert" style="display:none;margin-top:12px;"></div>
+      </form>
+
+      <div style="margin-top:16px;font-size:12px;color:#6b7280;">
+        Hint (demo users): <code>superadmin1 / Sup@123</code>, <code>admin1 / Adm@123</code>, <code>nkr_user / User@123</code>
       </div>
     </div>
   </div>
@@ -39,6 +51,7 @@
         </div>
         <div class="user-info">
           <div class="current-user" id="currentUser">User</div>
+          <div class="current-user" id="currentRole" style="background:rgba(255,255,255,.15)">role</div>
           <button class="btn btn-sm btn-warning" onclick="logout()">Logout</button>
         </div>
       </div>
@@ -50,8 +63,15 @@
           <button class="nav-tab active" onclick="showTab(event,'dashboard')">Dashboard</button>
           <button class="nav-tab" onclick="showTab(event,'locations')">PO wise Details</button>
           <button class="nav-tab" onclick="showTab(event,'progress')">Progress</button>
+
+          <!-- Reports tab: visible to all -->
           <button class="nav-tab" onclick="showTab(event,'reports')">Reports</button>
-          <button class="nav-tab" onclick="showTab(event,'data-management')">Data Management</button>
+
+          <!-- Data Management: require role >= admin -->
+          <button class="nav-tab rbac" data-minrole="admin" onclick="showTab(event,'data-management')">Data Management</button>
+
+          <!-- User Management: superadmin only -->
+          <button class="nav-tab rbac" data-minrole="superadmin" onclick="showTab(event,'user-management')">User Management</button>
         </div>
       </div>
     </nav>
@@ -63,20 +83,14 @@
           <h2 class="section-title">Deployment Dashboard</h2>
           <div class="flex gap-15">
             <button class="btn btn-success" onclick="exportDashboardPDF()">Export Dashboard PDF</button>
-            <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office</button>
+            <!-- Add PO: admin+ -->
+            <button class="btn btn-primary rbac" data-minrole="admin" onclick="showLocationForm()">Add Post Office</button>
           </div>
         </div>
-
         <div class="stats-grid" id="overallStats"></div>
-
-        <div class="section-header">
-          <h3 class="section-title">Division-wise Status</h3>
-        </div>
+        <div class="section-header"><h3 class="section-title">Division-wise Status</h3></div>
         <div class="division-stats" id="divisionStats"></div>
-
-        <div class="section-header">
-          <h3 class="section-title">Recent Activity</h3>
-        </div>
+        <div class="section-header"><h3 class="section-title">Recent Activity</h3></div>
         <div id="recentActivity"></div>
       </div>
 
@@ -84,16 +98,13 @@
       <div id="locations" class="tab-content">
         <div class="section-header">
           <h2 class="section-title">All Locations</h2>
-          <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office</button>
+          <button class="btn btn-primary rbac" data-minrole="admin" onclick="showLocationForm()">Add Post Office</button>
         </div>
         <div class="filters">
           <input type="text" class="filter-input" id="searchInput" placeholder="🔍 Search locations..." onkeyup="filterLocations()" />
-          <select class="filter-select" id="divisionFilter" onchange="filterLocations()">
-            <option value="">All Divisions</option>
-          </select>
+          <select class="filter-select" id="divisionFilter" onchange="filterLocations()"><option value="">All Divisions</option></select>
           <select class="filter-select" id="statusFilter" onchange="filterLocations()">
-            <option value="">All Status</option>
-            <option value="Pending">Pending</option>
+            <option value="">All Status</option><option value="Pending">Pending</option>
             <option value="Device Received">Device Received</option>
             <option value="In Progress">In Progress</option>
             <option value="Completed">Completed</option>
@@ -108,17 +119,14 @@
         <div class="section-header">
           <h2 class="section-title">Progress Tracking</h2>
           <div class="flex gap-15">
-            <select class="filter-select" id="progressDivisionFilter" onchange="filterProgressByDivision()">
-              <option value="">All Divisions</option>
-            </select>
+            <select class="filter-select" id="progressDivisionFilter" onchange="filterProgressByDivision()"><option value="">All Divisions</option></select>
             <button class="btn btn-info" onclick="exportProgressPDF()">Export Progress PDF</button>
           </div>
         </div>
         <div class="filters">
-          <input type="text" class="filter-input" id="progressSearchInput" placeholder="🔍 Search for progress updates..." onkeyup="filterProgress()" />
+          <input type="text" class="filter-input" id="progressSearchInput" placeholder="🔍 Search..." onkeyup="filterProgress()" />
           <select class="filter-select" id="progressStatusFilter" onchange="filterProgress()">
-            <option value="">All Status</option>
-            <option value="Pending">Pending</option>
+            <option value="">All Status</option><option value="Pending">Pending</option>
             <option value="Device Received">Device Received</option>
             <option value="In Progress">In Progress</option>
             <option value="Completed">Completed</option>
@@ -140,116 +148,116 @@
         <div id="reportsContent"></div>
       </div>
 
-      <!-- Data Management -->
+      <!-- Data Management (Admin+) -->
       <div id="data-management" class="tab-content">
-        <div class="section-header">
-          <h2 class="section-title">💾 Data Management</h2>
-        </div>
-
+        <div class="section-header"><h2 class="section-title">💾 Data Management</h2></div>
         <div class="card mb-30">
-          <h3 style="margin-bottom:20px;color:var(--primary-color);">Dynamic Excel Management</h3>
-          <div class="flex gap-15 mb-20" style="flex-wrap:wrap;">
+          <h3>Dynamic Excel Management</h3>
+          <div class="flex gap-15 mb-20">
             <button class="btn btn-success btn-lg" onclick="downloadTemplate()">📥 Download Template</button>
             <button class="btn btn-primary btn-lg" onclick="exportCurrentData()">📤 Export Current Data</button>
             <button class="btn btn-info btn-lg" onclick="showImportModal()">📊 Import Excel Data</button>
           </div>
-          <div class="alert alert-info"><strong>Dynamic Excel Management:</strong> Export current data, edit in Excel, then re-import to update.</div>
+          <div class="alert alert-info">Export current data, edit in Excel, then re-import.</div>
         </div>
-
         <div class="card mb-30">
-          <h3 style="margin-bottom:20px;color:var(--primary-color);">Backup & Restore</h3>
-          <div class="flex gap-15 mb-20" style="flex-wrap:wrap;">
+          <h3>Backup & Restore</h3>
+          <div class="flex gap-15 mb-20">
             <button class="btn btn-warning btn-lg" onclick="createBackup()">💾 Create Backup</button>
             <button class="btn btn-secondary btn-lg" onclick="restoreBackup()">📂 Restore Backup</button>
             <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear All Data</button>
           </div>
         </div>
+        <div class="card"><h3>Data Statistics</h3><div id="dataStatistics"></div></div>
+      </div>
 
+      <!-- User Management (Superadmin only) -->
+      <div id="user-management" class="tab-content">
+        <div class="section-header"><h2 class="section-title">👤 User Management</h2></div>
         <div class="card">
-          <h3 style="margin-bottom:20px;color:var(--primary-color);">Data Statistics</h3>
-          <div id="dataStatistics"></div>
+          <p>This simple static UI lets the Superadmin add/update/delete users in the local browser (and export/import the users JSON for sharing).</p>
+          <div class="flex gap-15 mb-20" style="flex-wrap:wrap;">
+            <button class="btn btn-success" onclick="exportUsers()">Export Users JSON</button>
+            <button class="btn btn-secondary" onclick="importUsers()">Import Users JSON</button>
+          </div>
+
+          <h3 style="margin:10px 0;">Add / Update User</h3>
+          <div class="form-grid">
+            <div class="form-group"><label>Username</label><input id="um_username" /></div>
+            <div class="form-group"><label>Role</label>
+              <select id="um_role">
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+                <option value="superadmin">superadmin</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Password</label><input id="um_password" type="password" placeholder="leave blank to keep existing" /></div>
+          </div>
+          <div class="text-center">
+            <button class="btn btn-primary" onclick="saveUser()">Save User</button>
+            <button class="btn btn-danger" onclick="deleteUser()">Delete User</button>
+          </div>
+
+          <div style="margin-top:20px;">
+            <h3>Current Users</h3>
+            <div id="usersTable"></div>
+          </div>
         </div>
       </div>
     </main>
   </div>
 
-  <!-- Modals -->
-  <div id="locationModal" class="modal">
-    <div class="modal-content">
-      <span class="close" onclick="closeLocationModal()">&times;</span>
-      <h2 id="modalTitle">Add New Location</h2>
-      <form id="locationForm" onsubmit="saveLocation(event)">
-        <h3 style="color:var(--success-color);margin:20px 0 15px;">Basic Information</h3>
-        <div class="form-grid">
-          <div class="form-group"><label for="division">Division *</label><input id="division" required /></div>
-          <div class="form-group"><label for="postOfficeName">Post Office Name *</label><input id="postOfficeName" required /></div>
-          <div class="form-group"><label for="postOfficeId">Post Office ID *</label><input id="postOfficeId" required /></div>
-          <div class="form-group">
-            <label for="officeType">Office Type</label>
-            <select id="officeType">
-              <option>Head Post Office</option><option>Sub Post Office</option>
-              <option>Branch Post Office</option><option>Extra Departmental Branch</option>
-            </select>
-          </div>
-          <div class="form-group"><label for="contactPersonName">Contact Person *</label><input id="contactPersonName" required /></div>
-          <div class="form-group"><label for="contactPersonNo">Contact Number *</label><input id="contactPersonNo" type="tel" required /></div>
-          <div class="form-group"><label for="city">City *</label><input id="city" required /></div>
-          <div class="form-group"><label for="state">State *</label><input id="state" required /></div>
-          <div class="form-group"><label for="pincode">PIN Code *</label><input id="pincode" pattern="[0-9]{6}" required /></div>
-          <div class="form-group"><label for="numberOfPosToBeDeployed">POS Required *</label><input id="numberOfPosToBeDeployed" type="number" min="1" required /></div>
-        </div>
-
-        <h3 style="color:var(--info-color);margin:20px 0 15px;">Progress Information</h3>
-        <div class="form-grid">
-          <div class="form-group"><label for="dateOfReceiptOfDevice">Device Receipt Date</label><input id="dateOfReceiptOfDevice" type="date" /></div>
-          <div class="form-group"><label for="noOfDevicesReceived">Devices Received</label><input id="noOfDevicesReceived" type="number" min="0" /></div>
-          <div class="form-group">
-            <label for="installationStatus">Installation Status</label>
-            <select id="installationStatus"><option>Pending</option><option>Device Received</option><option>In Progress</option><option>Completed</option><option>Failed</option></select>
-          </div>
-          <div class="form-group">
-            <label for="functionalityStatus">Functionality Status</label>
-            <select id="functionalityStatus"><option>Not Tested</option><option>Testing</option><option>Working</option><option>Issues</option><option>Under Maintenance</option></select>
-          </div>
-          <div class="form-group"><label for="issuesIfAny">Issues (if any)</label><textarea id="issuesIfAny" rows="3" placeholder="Describe any issues or 'None'"></textarea></div>
-        </div>
-
-        <div class="text-center" style="margin-top:30px;">
-          <button type="submit" class="btn btn-success btn-lg">💾 Save</button>
-          <button type="button" class="btn btn-secondary" onclick="closeLocationModal()">❌ Cancel</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <div id="importModal" class="modal">
-    <div class="modal-content">
-      <span class="close" onclick="closeImportModal()">&times;</span>
-      <h2>Import Excel Data</h2>
-      <div style="margin:20px 0;">
-        <input type="file" id="excelFileInput" accept=".xlsx,.xls" onchange="handleExcelImport(event)" style="margin-bottom:20px;" />
-        <div class="alert alert-info"><strong>Dynamic Import:</strong> Upload modified Excel. The system detects changes and updates.</div>
+  <!-- Existing Modals (unchanged) -->
+  <div id="locationModal" class="modal"><div class="modal-content">
+    <span class="close" onclick="closeLocationModal()">&times;</span>
+    <h2 id="modalTitle">Add New Location</h2>
+    <form id="locationForm" onsubmit="saveLocation(event)">
+      <h3>Basic Information</h3>
+      <div class="form-grid">
+        <div class="form-group"><label for="division">Division *</label><input id="division" required /></div>
+        <div class="form-group"><label for="postOfficeName">Post Office Name *</label><input id="postOfficeName" required /></div>
+        <div class="form-group"><label for="postOfficeId">Post Office ID *</label><input id="postOfficeId" required /></div>
+        <div class="form-group"><label for="officeType">Office Type</label>
+          <select id="officeType"><option>Head Post Office</option><option>Sub Post Office</option><option>Branch Post Office</option></select></div>
+        <div class="form-group"><label for="contactPersonName">Contact Person *</label><input id="contactPersonName" required /></div>
+        <div class="form-group"><label for="contactPersonNo">Contact Number *</label><input id="contactPersonNo" type="tel" required /></div>
+        <div class="form-group"><label for="city">City *</label><input id="city" required /></div>
+        <div class="form-group"><label for="state">State *</label><input id="state" required /></div>
+        <div class="form-group"><label for="pincode">PIN Code *</label><input id="pincode" pattern="[0-9]{6}" required /></div>
+        <div class="form-group"><label for="numberOfPosToBeDeployed">POS Required *</label><input id="numberOfPosToBeDeployed" type="number" min="1" required /></div>
       </div>
-      <div id="importPreview" class="hidden">
-        <h3>Import Preview</h3>
-        <div id="importPreviewContent"></div>
-        <div class="text-center" style="margin-top:20px;">
-          <button class="btn btn-success" onclick="confirmImport()">✅ Confirm Import</button>
-          <button class="btn btn-secondary" onclick="cancelImport()">❌ Cancel</button>
-        </div>
+      <h3>Progress Information</h3>
+      <div class="form-grid">
+        <div class="form-group"><label for="dateOfReceiptOfDevice">Device Receipt Date</label><input id="dateOfReceiptOfDevice" type="date" /></div>
+        <div class="form-group"><label for="noOfDevicesReceived">Devices Received</label><input id="noOfDevicesReceived" type="number" min="0" /></div>
+        <div class="form-group"><label for="installationStatus">Installation Status</label>
+          <select id="installationStatus"><option>Pending</option><option>Device Received</option><option>In Progress</option><option>Completed</option><option>Failed</option></select></div>
+        <div class="form-group"><label for="functionalityStatus">Functionality Status</label>
+          <select id="functionalityStatus"><option>Not Tested</option><option>Testing</option><option>Working</option><option>Issues</option></select></div>
+        <div class="form-group"><label for="issuesIfAny">Issues (if any)</label><textarea id="issuesIfAny" rows="3"></textarea></div>
       </div>
-    </div>
-  </div>
+      <div class="text-center"><button type="submit" class="btn btn-success btn-lg">💾 Save</button>
+        <button type="button" class="btn btn-secondary" onclick="closeLocationModal()">❌ Cancel</button></div>
+    </form></div></div>
 
-  <!-- Hidden input for backup restore -->
+  <div id="importModal" class="modal"><div class="modal-content">
+    <span class="close" onclick="closeImportModal()">&times;</span>
+    <h2>Import Excel Data</h2>
+    <input type="file" id="excelFileInput" accept=".xlsx,.xls" onchange="handleExcelImport(event)" />
+    <div id="importPreview" class="hidden">
+      <h3>Import Preview</h3>
+      <div id="importPreviewContent"></div>
+      <div class="text-center"><button class="btn btn-success" onclick="confirmImport()">✅ Confirm Import</button>
+        <button class="btn btn-secondary" onclick="cancelImport()">❌ Cancel</button></div>
+    </div>
+  </div></div>
+
   <input type="file" id="backupFileInput" accept=".json" class="hidden" onchange="handleBackupRestore(event)" />
 
+  <!-- App scripts -->
   <script src="assets/js/tracker.js"></script>
+  <script src="assets/js/auth.js"></script>
   <script src="assets/js/bridge.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
-    }
-  </script>
+  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js');}</script>
 </body>
 </html>

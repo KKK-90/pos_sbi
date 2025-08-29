@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://nkr-ka.in/sitemap.xml

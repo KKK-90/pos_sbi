@@ -1,0 +1,20 @@
+[
+  {
+    "username": "superadmin1",
+    "role": "superadmin",
+    "salt": "bd2b18670d24b8f9ddc429c5682c3b51",
+    "hash": "2bd756e5143e273e0c13bcaaf84383719c0b2becf4d3745385beed602357979f"
+  },
+  {
+    "username": "admin1",
+    "role": "admin",
+    "salt": "7284279fcc5b960572ad590cd1363546",
+    "hash": "72ec7aa8e5a5c7e40e37ebeb50fd59a799e20150b02d13d863bd40f5805cd7d4"
+  },
+  {
+    "username": "nkr_user",
+    "role": "user",
+    "salt": "275c49ad9fff196d9638539f8decbb11",
+    "hash": "8e2ec36a65959f314676b4c42af1b863429f355867b6616be40313cd460a0d3a"
+  }
+]

@@ -57,7 +57,7 @@
       <div class="nav-container">
         <div class="nav-tabs">
           <button class="nav-tab active" onclick="showTab(event,'dashboard')">Dashboard</button>
-          <button class="nav-tab" onclick="showTab(event,'locations')">PO wise Details</button>
+          <button class="nav-tab" onclick="showTab(event,'locations')">Office wise Details</button>
           <button class="nav-tab" onclick="showTab(event,'progress')">Progress</button>
 
           <!-- Reports tab: visible to all -->
@@ -93,11 +93,11 @@
       <!-- Locations -->
       <div id="locations" class="tab-content">
         <div class="section-header">
-          <h2 class="section-title">All Locations</h2>
+          <h2 class="section-title">All Offices</h2>
           <button class="btn btn-primary rbac" data-minrole="admin" onclick="showLocationForm()">Add Post Office</button>
         </div>
         <div class="filters">
-          <input type="text" class="filter-input" id="searchInput" placeholder="🔍 Search locations..." onkeyup="filterLocations()" />
+          <input type="text" class="filter-input" id="searchInput" placeholder="🔍 Search Offices..." onkeyup="filterLocations()" />
           <select class="filter-select" id="divisionFilter" onchange="filterLocations()"><option value="">All Divisions</option></select>
           <select class="filter-select" id="statusFilter" onchange="filterLocations()">
             <option value="">All Status</option><option value="Pending">Pending</option>
@@ -152,7 +152,7 @@
           <div class="flex gap-15 mb-20">
             <button class="btn btn-success btn-lg" onclick="downloadTemplate()">📥 Download Template</button>
             <button class="btn btn-primary btn-lg" onclick="exportCurrentData()">📤 Export Current Data</button>
-            <button class="btn btn-info btn-lg" onclick="showImportModal()">📊 Import Excel Data</button>
+            <button class="btn btn-info btn-lg" onclick="showImportModal()">📤 Import Excel Data</button>
           </div>
           <div class="alert alert-info">Export current data, edit in Excel, then re-import.</div>
         </div>
@@ -169,7 +169,7 @@
 
       <!-- User Management (Superadmin only) -->
       <div id="user-management" class="tab-content">
-        <div class="section-header"><h2 class="section-title">👤 User Management</h2></div>
+        <div class="section-header"><h2 class="section-title">User Management</h2></div>
         <div class="card">
           <p>This simple static UI lets the Superadmin add/update/delete users in the local browser (and export/import the users JSON for sharing).</p>
           <div class="flex gap-15 mb-20" style="flex-wrap:wrap;">
@@ -206,7 +206,7 @@
   <!-- Existing Modals (unchanged) -->
   <div id="locationModal" class="modal"><div class="modal-content">
     <span class="close" onclick="closeLocationModal()">&times;</span>
-    <h2 id="modalTitle">Add New Location</h2>
+    <h2 id="modalTitle">Add New Office</h2>
     <form id="locationForm" onsubmit="saveLocation(event)">
       <h3>Basic Information</h3>
       <div class="form-grid">

@@ -275,7 +275,7 @@ class AdvancedPOSTracker {
     return;
   }
 
-  // ---- Region Summary tiles (unchanged) ----
+  // ---------- Region Summary ----------
   const totalOffices = rows.length;
   const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
   const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
@@ -292,14 +292,14 @@ class AdvancedPOSTracker {
     </div>
   `;
 
-  // ---- Division-wise Detailed Report ----
+  // ---------- Division-wise Detailed Report ----------
   const byDiv = {};
   rows.forEach(r => {
     const d = r.division || "—";
     (byDiv[d] ||= []).push(r);
   });
 
-  // helper: issue present = non-empty and not "None" (case-insensitive)
+  // issue present = non-empty and not "None" (case-insensitive)
   const hasIssue = (v)=>{
     const s = (v ?? "").toString().trim();
     return s && s.toLowerCase() !== "none";
@@ -339,11 +339,11 @@ class AdvancedPOSTracker {
       `;
     }).join("");
 
-  // ---- Totals row (added) ----
+  // Totals row
   const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
   const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegion);
   const totalIssues = rows.filter(x => hasIssue(x.issuesIfAny)).length;
-  const totalCompleted = devicesInstalledRegion; // same as Devices installed (spec)
+  const totalCompleted = devicesInstalledRegion;
   const totalCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
 
   const totalRow = `
@@ -387,7 +387,44 @@ class AdvancedPOSTracker {
     </table>
   `;
 
-  host.innerHTML = summaryHTML + divisionsHTML;
+  // ---------- ⚠️ Locations with Issues (restored) ----------
+  const issuesList = rows.filter(r => hasIssue(r.issuesIfAny));
+  let issuesHTML = "";
+  if (issuesList.length){
+    const items = issuesList
+      .sort((a,b)=> (a.division||"").localeCompare(b.division||"") || (a.postOfficeName||"").localeCompare(b.postOfficeName||""))
+      .map(l => `
+        <tr>
+          <td>${l.postOfficeName || ""}</td>
+          <td>${l.division || ""}</td>
+          <td style="text-align:center">${l.installationStatus || ""}</td>
+          <td>${(l.issuesIfAny||"").toString().trim()}</td>
+          <td style="text-align:center">${l.contactPersonNo || ""}</td>
+        </tr>
+      `).join("");
+
+    issuesHTML = `
+      <div class="card mb-30" style="margin-top:20px;">
+        <h3 style="margin-bottom:20px;color:var(--danger-color);">⚠️ Locations with Issues (${issuesList.length})</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Post Office</th>
+                <th>Division</th>
+                <th>Status</th>
+                <th>Issues</th>
+                <th>Contact</th>
+              </tr>
+            </thead>
+            <tbody>${items}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  host.innerHTML = summaryHTML + divisionsHTML + issuesHTML;
 }
 
   // ---- PDF ----

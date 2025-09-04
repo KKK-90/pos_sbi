@@ -341,7 +341,54 @@ class AdvancedPOSTracker {
 
   // ---- Totals row (added) ----
   const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
-  const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegio
+  const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegion);
+  const totalIssues = rows.filter(x => hasIssue(x.issuesIfAny)).length;
+  const totalCompleted = devicesInstalledRegion; // same as Devices installed (spec)
+  const totalCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
+
+  const totalRow = `
+    <tr class="total-row">
+      <td><strong>Total</strong></td>
+      <td${tdC}><strong>${totalOffices}</strong></td>
+      <td${tdC}><strong>${totalDevicesRequired}</strong></td>
+      <td${tdC}><strong>${totalDevicesReceived}</strong></td>
+      <td${tdC}><strong>${totalPending}</strong></td>
+      <td${tdC}><strong>${devicesInstalledRegion}</strong></td>
+      <td${tdC}><strong>${totalPendingInstall}</strong></td>
+      <td${tdC}><strong>${totalIssues}</strong></td>
+      <td${tdC}><strong>${totalCompleted}</strong></td>
+      <td${tdC}><strong>${totalCompletionPct}%</strong></td>
+    </tr>
+  `;
+
+  const divisionsHTML = `
+    <div class="section-header" style="margin-top:20px;">
+      <h3 class="section-title">Division-wise Detailed Report</h3>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Division</th>
+          <th>Offices</th>
+          <th>Devices Required</th>
+          <th>Devices Received</th>
+          <th>Pending</th>
+          <th>Devices installed</th>
+          <th>Pending for installation</th>
+          <th>Issues</th>
+          <th>Completed</th>
+          <th>Completion %</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
+        ${totalRow}
+      </tbody>
+    </table>
+  `;
+
+  host.innerHTML = summaryHTML + divisionsHTML;
+}
 
   // ---- PDF ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }

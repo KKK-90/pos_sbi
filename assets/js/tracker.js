@@ -117,7 +117,7 @@ class AdvancedPOSTracker {
     document.getElementById("overallStats").innerHTML = `
       <div class="stat-card"><div class="stat-number">${totalLocations}</div><div class="stat-label">Total Locations</div></div>
       <div class="stat-card"><div class="stat-number">${totalDevicesDeployed}</div><div class="stat-label">Deployed Devices</div></div>
-      <div class="stat-card"><div class="stat-number">${pending}</div><div class="stat-label">Pending Installations</div></div>
+      <div class="stat-card"><div class="stat-number">${pending}</div><div class="stat-label">Installations Pending</div></div>
       <div class="stat-card"><div class="stat-number">${withIssues}</div><div class="stat-label">Issues Reported</div></div>
     `;
   }

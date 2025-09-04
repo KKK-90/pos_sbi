@@ -637,17 +637,44 @@ class AdvancedPOSTracker {
   y += 6;
 
   // Table header
-  function drawTableHeader(){
-    ensureSpace(24);
-    let x = tableX;
-    setBorder();
-    doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
-    // compute header height from wrapped labels (aim for single line; still supports wrap)
-    const headerHeights = tableCols.map(c => {
-      const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-      return Math.max(18, lines.length * lineH + 6);
-    });
-    const headerH = Math.max(...headerHeights);
+  // --- REPLACE JUST THIS FUNCTION inside exportReportsPDF() ---
+function drawTableHeader(){
+  // Calculate needed height (supports wrapped labels)
+  ensureSpace(24);
+  const headerHeights = tableCols.map(c => {
+    const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+    return Math.max(18, lines.length * lineH + 6);
+  });
+  const headerH = Math.max(...headerHeights);
+
+  // 1) Single full-width background (same color for all header cells)
+  doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
+  doc.rect(tableX, y, tableW, headerH, 'F');
+
+  // 2) Cell borders + text
+  setBorder();
+  let x = tableX;
+  tableCols.forEach(c=>{
+    // stroke cell box (no per-cell fill, so the background stays uniform)
+    doc.rect(x, y, c.w, headerH, 'S');
+
+    // header text (vertically centered, wrapped if needed)
+    doc.setFont('helvetica','bold'); 
+    doc.setFontSize(fontHead);
+    const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+    const startY = centerBlockY(y, headerH, lines);
+
+    if (c.align === 'left'){
+      doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
+    } else {
+      lines.forEach((ln,i)=> doc.text(ln, x + c.w/2, startY + i*lineH, { align:'center' }));
+    }
+    x += c.w;
+  });
+
+  y += headerH;
+}
+
     // cells
     tableCols.forEach(c=>{
       doc.rect(x, y, c.w, headerH, 'FD'); // fill + stroke

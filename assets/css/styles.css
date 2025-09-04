@@ -3,6 +3,10 @@
   --success-color:#27ae60; --warning-color:#f39c12; --danger-color:#e74c3c;
   --info-color:#2980b9; --light-color:#ecf0f1; --dark-color:#2c3e50;
   --bg-gradient:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+
+  /* fixed-header defaults (JS can overwrite these with actual heights) */
+  --header-h:72px;
+  --nav-h:56px;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%);color:var(--dark-color);line-height:1.6}
@@ -16,20 +20,30 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 .user-btn{padding:15px 20px;background:var(--accent-color);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;transition:all .3s ease;font-size:14px}
 .user-btn:hover{background:var(--primary-color);transform:translateY(-2px)}
 
-.app-header{background:var(--bg-gradient);color:#fff;padding:1rem 0;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+.app-header{
+  background:var(--bg-gradient);color:#fff;padding:1rem 0;box-shadow:0 2px 10px rgba(0,0,0,.1);
+  position:fixed; top:0; left:0; right:0; z-index:900; /* below .modal (1000) */
+}
 .header-content{max-width:1400px;margin:0 auto;padding:0 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}
 .app-title{font-size:1.8rem;font-weight:700;margin-bottom:.5rem}
 .user-info{display:flex;align-items:center;gap:15px;font-size:.9rem}
 .current-user{background:rgba(255,255,255,.2);padding:5px 12px;border-radius:20px;font-weight:600}
 
-.app-nav{background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.1)}
+.app-nav{
+  background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.1);
+  position:fixed; top:var(--header-h); left:0; right:0; z-index:890;
+}
 .nav-container{max-width:1600px;margin:0 auto;padding:0 40px}
 .nav-tabs{display:flex;gap:0;overflow-x:auto}
 .nav-tab{padding:15px 25px;border:none;background:none;cursor:pointer;font-weight:600;color:var(--secondary-color);border-bottom:3px solid transparent;transition:all .3s ease;white-space:nowrap}
 .nav-tab:hover{background:var(--light-color);color:var(--primary-color)}
 .nav-tab.active{color:var(--accent-color);border-bottom-color:var(--accent-color)}
 
-.app-main{flex:1;max-width:1400px;margin:0 auto;padding:30px 20px;width:100%}
+.app-main{
+  flex:1;max-width:1400px;margin:0 auto;width:100%;
+  /* push content below the fixed header + nav */
+  padding:calc(30px + var(--header-h) + var(--nav-h)) 20px 30px;
+}
 .tab-content{display:none}
 .tab-content.active{display:block}
 

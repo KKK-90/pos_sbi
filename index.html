@@ -255,5 +255,18 @@
   <script src="assets/js/auth.js"></script>
   <script src="assets/js/bridge.js"></script>
   <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js');}</script>
+  <script>
+  (function(){
+    function updateFixedHeights(){
+      const root = document.documentElement;
+      const header = document.querySelector('.app-header');
+      const nav = document.querySelector('.app-nav');
+      if (header) root.style.setProperty('--header-h', header.offsetHeight + 'px');
+      if (nav)    root.style.setProperty('--nav-h', nav.offsetHeight + 'px');
+    }
+    window.addEventListener('load', updateFixedHeights);
+    window.addEventListener('resize', updateFixedHeights);
+  })();
+</script>
 </body>
 </html>

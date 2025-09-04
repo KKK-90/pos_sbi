@@ -304,39 +304,44 @@ class AdvancedPOSTracker {
       return s && s.toLowerCase() !== "none";
     };
 
+    // custom sort: alphabetical, but "RMS HB Division" always last
+    const entries = Object.entries(byDiv).sort(([a],[b])=>{
+      if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
+      if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
+      return a.localeCompare(b);
+    });
+
     const tdC = ' style="text-align:center"';
 
-    const tableRows = Object.entries(byDiv)
-      .sort(([a],[b]) => a.localeCompare(b))
-      .map(([division, arr]) => {
-        const offices = arr.length;
-        const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
-        const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
-        const pending = Math.max(0, devicesRequired - devicesReceived);
+    const tableRows = entries.map(([division, arr]) => {
+      const offices = arr.length;
+      const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
+      const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
+      const pending = Math.max(0, devicesRequired - devicesReceived);
 
-        const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
-        const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
+      const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+      const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
 
-        const issues = arr.filter(x => hasIssue(x.issuesIfAny)).length;
+      const issues = arr.filter(x => hasIssue(x.issuesIfAny)).length;
 
-        const completed = devicesInstalled;
-        const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
+      const completed = devicesInstalled;
+      const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
 
-        return `
-          <tr>
-            <td>${division}</td>
-            <td${tdC}>${offices}</td>
-            <td${tdC}>${devicesRequired}</td>
-            <td${tdC}>${devicesReceived}</td>
-            <td${tdC}>${pending}</td>
-            <td${tdC}>${devicesInstalled}</td>
-            <td${tdC}>${pendingInstall}</td>
-            <td${tdC}>${issues}</td>
-            <td${tdC}>${completed}</td>
-            <td${tdC}>${completionPct}%</td>
-          </tr>
-        `;
-      }).join("");
+      return `
+        <tr>
+          <td>${division}</td>
+          <td${tdC}>${offices}</td>
+          <td${tdC}>${devicesRequired}</td>
+          <td${tdC}>${devicesReceived}</td>
+          <td${tdC}>${pending}</td>
+          <td${tdC}>${devicesInstalled}</td>
+          <td${tdC}>${pendingInstall}</td>
+          <td${tdC}>${issues}</td>
+          <td${tdC}>${completed}</td>
+          <td${tdC}>${completionPct}%</td>
+        </tr>
+      `;
+    }).join("");
 
     // Totals row
     const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
@@ -430,8 +435,9 @@ class AdvancedPOSTracker {
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // Professional reports PDF with orientation chooser, DD/MM/YYYY dates, light header fill, uniform header background,
-  // vertically centered cells, and "Devices received today" in Region Summary.
+  // Professional reports PDF with orientation chooser, DD/MM/YYYY dates, uniform light header fill,
+  // vertically centered cells, "Devices received today" in Region Summary,
+  // and AUTO-FIT column widths based on header + content.
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
@@ -511,8 +517,15 @@ class AdvancedPOSTracker {
       (byDiv[d] ||= []).push(r);
     });
 
+    // Division entries: alphabetical except "RMS HB Division" last
+    const entries = Object.entries(byDiv).sort(([a],[b])=>{
+      if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
+      if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
+      return a.localeCompare(b);
+    });
+
     // Rows for table
-    const divisions = Object.entries(byDiv).sort(([a],[b]) => a.localeCompare(b)).map(([division, arr])=>{
+    const divisions = entries.map(([division, arr])=>{
       const offices = arr.length;
       const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
       const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
@@ -564,24 +577,90 @@ class AdvancedPOSTracker {
     const lineH     = 11;
     const padX      = 6;
 
-    // Table columns
+    // Table columns (labels + alignment)
     const tableCols = [
-      { key:'division', label:'Division', ratio:0.21, align:'left'  },
-      { key:'offices',  label:'Offices', ratio:0.07, align:'center'},
-      { key:'req',      label:'Devices Required', ratio:0.11, align:'center'},
-      { key:'rec',      label:'Devices Received', ratio:0.11, align:'center'},
-      { key:'pend',     label:'Pending', ratio:0.08, align:'center'},
-      { key:'inst',     label:'Devices Installed', ratio:0.11, align:'center'},
-      { key:'pinst',    label:'Pending Install', ratio:0.13, align:'center'},
-      { key:'iss',      label:'Issues', ratio:0.06, align:'center'},
-      { key:'comp',     label:'Completed', ratio:0.06, align:'center'},
-      { key:'pct',      label:'Completion %', ratio:0.06, align:'center'},
+      { key:'division', label:'Division', align:'left'  },
+      { key:'offices',  label:'Offices', align:'center'},
+      { key:'req',      label:'Devices Required', align:'center'},
+      { key:'rec',      label:'Devices Received', align:'center'},
+      { key:'pend',     label:'Pending', align:'center'},
+      { key:'inst',     label:'Devices Installed', align:'center'},
+      { key:'pinst',    label:'Pending Install', align:'center'},
+      { key:'iss',      label:'Issues', align:'center'},
+      { key:'comp',     label:'Completed', align:'center'},
+      { key:'pct',      label:'Completion %', align:'center'},
     ];
     const tableX = margin;
     const tableW = pageW - margin*2;
-    tableCols.forEach(c => c.w = Math.floor(c.ratio * tableW));
 
-    // Helpers
+    // --- Auto-fit column widths (measure header + content) ---
+    function computeAutoWidths(){
+      // min widths (pt)
+      const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
+
+      // measure header width at header font
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+      const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+
+      // measure content width at body font (consider divisions, numbers, totals row)
+      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+      const contentW = tableCols.map(() => 0);
+
+      const consider = obj => {
+        tableCols.forEach((c, i) => {
+          const v = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
+          const w = Math.ceil(doc.getTextWidth(v) + padX*2 + 2);
+          if (w > contentW[i]) contentW[i] = w;
+        });
+      };
+      divisions.forEach(consider);
+      consider(totalsRow);
+
+      // desired width = max(header, content, min)
+      let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
+      let sumDesired = desired.reduce((a,b)=>a+b,0);
+
+      // scale down if over
+      if (sumDesired > tableW){
+        const scale = tableW / sumDesired;
+        desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
+        let sum = desired.reduce((a,b)=>a+b,0);
+        // if still over (due to min constraints), shave from widest slack columns
+        let tries = 0;
+        while (sum > tableW && tries < 200){
+          // find column with most slack over min
+          let idx = -1, slackMax = -1;
+          for (let i=0;i<desired.length;i++){
+            const slack = desired[i] - minW[i];
+            if (slack > slackMax){ slackMax = slack; idx = i; }
+          }
+          if (idx < 0) break;
+          desired[idx] -= 1;
+          sum -= 1;
+          tries++;
+        }
+      } else if (sumDesired < tableW){
+        // distribute leftover (bias to Division and longer-text columns)
+        let leftover = tableW - sumDesired;
+        const priorityKeys = ['division','pinst','req','rec','inst'];
+        while (leftover > 0){
+          let advanced = false;
+          for (let i=0;i<tableCols.length && leftover>0;i++){
+            if (priorityKeys.includes(tableCols[i].key)){
+              desired[i] += 1; leftover -= 1; advanced = true;
+            }
+          }
+          if (!advanced){
+            for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i]+=1; leftover-=1; }
+          }
+        }
+      }
+
+      // assign to columns
+      tableCols.forEach((c,i)=> c.w = desired[i]);
+    }
+
+    // helpers
     function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
     function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
     function newPage(){ doc.addPage(); y = margin; drawHeader(); }
@@ -634,11 +713,15 @@ class AdvancedPOSTracker {
     });
     y += 6;
 
+    // compute auto widths now that we know rows
+    computeAutoWidths();
+
     // Table header (uniform background across the whole header row)
     function drawTableHeader(){
       ensureSpace(24);
       setBorder();
       // compute header height from wrapped labels
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerHeights = tableCols.map(c => {
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
         return Math.max(18, lines.length * lineH + 6);
@@ -647,13 +730,13 @@ class AdvancedPOSTracker {
 
       // Single full-width background
       doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
-      doc.rect(tableX, y, tableW, headerH, 'F');
+      const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+      doc.rect(tableX, y, totalW, headerH, 'F');
 
       // Per-cell borders + text
       let x = tableX;
       tableCols.forEach(c=>{
         doc.rect(x, y, c.w, headerH, 'S');
-        doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
         const startY = centerBlockY(y, headerH, lines);
         if (c.align === 'left'){
@@ -669,6 +752,7 @@ class AdvancedPOSTracker {
 
     // Table row
     function drawRow(obj, stripe=false, bold=false){
+      doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
       const cells = tableCols.map(col=>{
         const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
         const lines = doc.splitTextToSize(raw, col.w - padX*2);
@@ -680,13 +764,13 @@ class AdvancedPOSTracker {
 
       if (stripe){
         doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
-        doc.rect(tableX, y, tableW, rowH, 'F');
+        const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+        doc.rect(tableX, y, totalW, rowH, 'F');
       }
       setBorder();
       let x = tableX;
       cells.forEach(({col,lines})=>{
         doc.rect(x, y, col.w, rowH, 'S');
-        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
         const startY = centerBlockY(y, rowH, lines);
         if (col.align === 'left'){
           doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
@@ -784,7 +868,7 @@ class AdvancedPOSTracker {
   }
   exportCurrentData(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPORTED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
     const rows=this.locations.map(l=>[
       l.slNo||'',l.division||'',l.postOfficeName||'',l.postOfficeId||'',l.officeType||'',
       l.contactPersonName||'',l.contactPersonNo||'',l.altContactNo||'',l.contactEmail||'',

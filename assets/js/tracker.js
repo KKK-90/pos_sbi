@@ -433,42 +433,140 @@ class AdvancedPOSTracker {
   exportReportsPDF(){
   if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
 
-  const rows = this.locations || [];
+  // ----- (A) Orientation choice -----
+  // OK = Landscape, Cancel = Portrait
+  const landscape = window.confirm("Generate PDF in Landscape? (OK = Landscape, Cancel = Portrait)");
+  const orientation = landscape ? "landscape" : "portrait";
+
+  // ----- (B) Helpers -----
+  const formatDMY = (d)=> {
+    const dd = String(d.getDate()).padStart(2,"0");
+    const mm = String(d.getMonth()+1).padStart(2,"0");
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  };
   const toInt = v => parseInt(v) || 0;
 
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 40;
-  let y = margin;
-
-  // --- aggregates for Region Summary ---
+  // ----- (C) Data prep -----
+  const rows = this.locations || [];
   const totalOffices = rows.length;
   const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
   const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
-  const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+  const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length; // per spec
   const overallCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
 
-  // group by division
+  // Group by division
   const byDiv = {};
   rows.forEach(r=>{
     const d = r.division || "—";
     (byDiv[d] ||= []).push(r);
   });
 
-  // --- header (exact text requested) ---
-  const today = new Date();
-  const dateStr = today.toLocaleDateString(undefined, { year:'numeric', month:'2-digit', day:'2-digit' });
-  doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  doc.text('North Karnataka Region', margin, y); y += 22;
-  doc.setFont('helvetica','normal'); doc.setFontSize(12);
-  doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 18;
-  doc.text(`Report for the date: ${dateStr}`, margin, y); y += 20;
+  // Flatten to division summary rows (for the table)
+  const divisions = Object.entries(byDiv).sort(([a],[b]) => a.localeCompare(b)).map(([division, arr])=>{
+    const offices = arr.length;
+    const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
+    const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
+    const pend = Math.max(0, req - rec);
+    const inst = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+    const pinst = Math.max(0, rec - inst);
+    const iss = arr.filter(x => (x.issuesIfAny||"").toString().trim() && (x.issuesIfAny||"").toString().trim().toLowerCase() !== "none").length;
+    const comp = inst;
+    const pct = req ? Math.round((inst/req)*100) : 0;
+    return { division, offices, req, rec, pend, inst, pinst, iss, comp, pct };
+  });
 
-  // --- Region Summary ---
+  // Totals row
+  const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
+  const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegion);
+  const totalIssues = rows.filter(x => (x.issuesIfAny||"").toString().trim() && (x.issuesIfAny||"").toString().trim().toLowerCase()!=="none").length;
+  const totalPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
+  const totalsRow = {
+    division: "Total",
+    offices: totalOffices,
+    req: totalDevicesRequired,
+    rec: totalDevicesReceived,
+    pend: totalPending,
+    inst: devicesInstalledRegion,
+    pinst: totalPendingInstall,
+    iss: totalIssues,
+    comp: devicesInstalledRegion,
+    pct: totalPct
+  };
+
+  // ----- (D) PDF doc -----
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  let y = margin;
+  let pageNo = 1;
+
+  // Colors & typography
+  const headerFill = { r: 240, g: 244, b: 248 };    // light header background
+  const stripeFill = { r: 248, g: 250, b: 252 };    // zebra rows
+  const borderGray = 160;
+  const brandBlue = { r: 52, g: 152, b: 219 };
+
+  // Column layout (ratios sum ~1; landscape gives more width automatically)
+  const tableCols = [
+    { key:'division', label:'Division', ratio:0.20, align:'left'  },
+    { key:'offices',  label:'Offices', ratio:0.07, align:'center'},
+    { key:'req',      label:'Devices Required', ratio:0.11, align:'center'},
+    { key:'rec',      label:'Devices Received', ratio:0.11, align:'center'},
+    { key:'pend',     label:'Pending', ratio:0.08, align:'center'},
+    { key:'inst',     label:'Devices installed', ratio:0.11, align:'center'},
+    { key:'pinst',    label:'Pending for installation', ratio:0.14, align:'center'},
+    { key:'iss',      label:'Issues', ratio:0.06, align:'center'},
+    { key:'comp',     label:'Completed', ratio:0.06, align:'center'},
+    { key:'pct',      label:'Completion %', ratio:0.06, align:'center'},
+  ];
+  const tableX = margin;
+  const tableW = pageW - margin*2;
+  tableCols.forEach(c => c.w = Math.floor(c.ratio * tableW));
+
+  const padX = 6;            // cell horizontal padding
+  const lineH = 12;          // line height for wrapped text
+  const fontBody = 10;       // body font size
+  const fontHead = 10.5;     // header font size
+
+  function setBorder() { doc.setDrawColor(borderGray); doc.setLineWidth(0.5); }
+  function newPage() {
+    doc.addPage();
+    pageNo += 1;
+    y = margin;
+    drawHeader();  // also repeat report title on each page for professionalism
+  }
+  function ensureSpace(h) { if (y + h > pageH - margin) newPage(); }
+
+  // ----- (E) Header block -----
+  function drawHeader(){
+    const dateStr = formatDMY(new Date());
+    // Title
+    doc.setFont('helvetica','bold'); doc.setFontSize(16);
+    doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
+    doc.text('North Karnataka Region', margin, y);
+    y += 22;
+
+    doc.setTextColor(0,0,0);
+    doc.setFont('helvetica','normal'); doc.setFontSize(12);
+    doc.text('SBI-DOP POS Machines Deployment status', margin, y);
+    y += 18;
+
+    doc.text(`Report for the date: ${dateStr}`, margin, y);
+    y += 10;
+
+    // Divider line
+    setBorder(); doc.line(margin, y, pageW - margin, y);
+    y += 20;
+  }
+  drawHeader();
+
+  // ----- (F) Region Summary as a neat two-column list -----
   doc.setFont('helvetica','bold'); doc.setFontSize(13);
-  doc.text('Region Summary', margin, y); y += 14;
+  doc.text('Region Summary', margin, y);
+  y += 14;
 
   doc.setFont('helvetica','normal'); doc.setFontSize(11);
   const rs = [
@@ -478,124 +576,109 @@ class AdvancedPOSTracker {
     ['Overall completion %', `${overallCompletionPct}%`]
   ];
   const colL = margin;
+  const valX = margin + 260;
   rs.forEach(([k,v])=>{
-    if (y > pageH - margin) { doc.addPage(); y = margin; }
+    ensureSpace(16);
     doc.text(`${k}:`, colL, y);
-    doc.text(v, colL + 220, y, { align:'right' });
+    doc.text(v, valX, y, { align:'right' });
     y += 16;
   });
+  y += 10;
+
+  // ----- (G) Division-wise Detailed Report (professional table with wrap & borders) -----
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  ensureSpace(20);
+  doc.text('Division-wise Detailed Report', margin, y);
   y += 8;
 
-  // --- Division-wise Detailed Report ---
-  if (y > pageH - margin - 60) { doc.addPage(); y = margin; }
-  doc.setFont('helvetica','bold'); doc.setFontSize(13);
-  doc.text('Division-wise Detailed Report', margin, y); y += 14;
+  function drawTableHeader(){
+    ensureSpace(24);
+    // Header background
+    doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
+    setBorder();
+    let x = tableX;
+    const headerHeight = 26;
 
-  // table columns (compact to fit A4)
-  const cols = [
-    { key:'division', label:'Division', w:120, align:'left' },
-    { key:'offices',  label:'Offices', w:40,  align:'center' },
-    { key:'req',      label:'Devices Required', w:70, align:'center' },
-    { key:'rec',      label:'Devices Received', w:70, align:'center' },
-    { key:'pend',     label:'Pending', w:50, align:'center' },
-    { key:'inst',     label:'Devices installed', w:70, align:'center' },
-    { key:'pinst',    label:'Pending for installation', w:90, align:'center' },
-    { key:'iss',      label:'Issues', w:45, align:'center' },
-    { key:'comp',     label:'Completed', w:55, align:'center' },
-    { key:'pct',      label:'Completion %', w:65, align:'center' },
-  ];
-  const tableX = margin;
-  const rowH = 18;
+    // Cells
+    tableCols.forEach(col => {
+      doc.rect(x, y, col.w, headerHeight, 'FD'); // Fill + stroke
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+      const wrapped = doc.splitTextToSize(col.label, col.w - padX*2);
+      const textY = y + (headerHeight/2) + 3; // vertically centered-ish
+      if (col.align === 'left') {
+        doc.text(wrapped, x + padX, textY, { align:'left', baseline:'middle' });
+      } else {
+        doc.text(wrapped, x + col.w/2, textY, { align:'center', baseline:'middle' });
+      }
+      x += col.w;
+    });
 
-  function newPageIfNeeded(extra=0){
-    if (y + extra > pageH - margin){
-      doc.addPage();
-      y = margin;
-    }
+    y += headerHeight;
   }
 
-  // header row
-  doc.setFont('helvetica','bold'); doc.setFontSize(10);
-  newPageIfNeeded(rowH + 6);
-  let x = tableX;
-  cols.forEach(c=>{
-    doc.text(c.label, x + (c.align==='left'? 2 : c.w/2), y, { align: c.align==='left'?'left':'center' });
-    x += c.w;
-  });
-  y += rowH - 6;
-  doc.setLineWidth(0.5);
-  doc.line(tableX, y, tableX + cols.reduce((s,c)=>s+c.w,0), y);
-  y += 8;
-
-  // body rows (divisions)
-  doc.setFont('helvetica','normal'); doc.setFontSize(10);
-  const ordered = Object.entries(byDiv).sort(([a],[b]) => a.localeCompare(b));
-  ordered.forEach(([division, arr])=>{
-    const offices = arr.length;
-    const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
-    const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
-    const pend = Math.max(0, req - rec);
-    const inst = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
-    const pinst = Math.max(0, rec - inst);
-    const iss = arr.filter(x => (x.issuesIfAny||"").toString().trim() && (x.issuesIfAny||"").toString().trim().toLowerCase()!=="none").length;
-    const comp = inst;
-    const pct = req ? Math.round((inst/req)*100) : 0;
-
-    newPageIfNeeded(rowH);
-    let cx = tableX;
-    const vals = [
-      {v:division, a:'left'},
-      {v:offices, a:'center'},
-      {v:req, a:'center'},
-      {v:rec, a:'center'},
-      {v:pend, a:'center'},
-      {v:inst, a:'center'},
-      {v:pinst, a:'center'},
-      {v:iss, a:'center'},
-      {v:comp, a:'center'},
-      {v:`${pct}%`, a:'center'},
-    ];
-    vals.forEach((val,i)=>{
-      const col = cols[i];
-      doc.text(String(val.v), cx + (val.a==='left'? 2 : col.w/2), y, { align: val.a==='left'?'left':'center' });
-      cx += col.w;
+  function drawRow(obj, stripe=false, bold=false){
+    // Compute wrapped text for each cell to determine row height
+    const cells = tableCols.map(col=>{
+      const v = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key]);
+      const text = (col.key === 'division') ? v : (v === 'undefined' ? '' : v);
+      const lines = doc.splitTextToSize(text, col.w - padX*2);
+      return { col, lines, h: Math.max(18, lines.length * lineH + 6) };
     });
+    const rowH = Math.max(...cells.map(c => c.h));
+    ensureSpace(rowH);
+
+    // stripe background
+    if (stripe){
+      doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
+      doc.rect(tableX, y, tableW, rowH, 'F');
+    }
+
+    // cells (borders + text)
+    setBorder();
+    let x = tableX;
+    cells.forEach(({col,lines})=>{
+      doc.rect(x, y, col.w, rowH, 'S');
+      doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
+      const baseY = y + 8;
+      if (col.align === 'left'){
+        doc.text(lines, x + padX, baseY, { align:'left', lineHeightFactor:1.3 });
+      } else {
+        // For centered columns place text at center horizontally
+        const centeredX = x + col.w/2;
+        // Draw each line centered
+        lines.forEach((ln, i)=>{
+          doc.text(ln, centeredX, baseY + i*lineH, { align:'center' });
+        });
+      }
+      x += col.w;
+    });
+
     y += rowH;
+  }
+
+  // Render header + rows
+  drawTableHeader();
+  divisions.forEach((r, idx) => {
+    // Re-draw header on page break when close to bottom
+    if (y > pageH - margin - 40){ newPage(); drawTableHeader(); }
+    drawRow(r, idx % 2 === 1);
   });
 
-  // totals row
-  const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
-  const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegion);
-  const totalIssues = rows.filter(x => (x.issuesIfAny||"").toString().trim() && (x.issuesIfAny||"").toString().trim().toLowerCase()!=="none").length;
-  const totalPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
+  // Totals row in bold
+  if (y > pageH - margin - 40){ newPage(); drawTableHeader(); }
+  drawRow(totalsRow, false, true);
 
-  newPageIfNeeded(rowH + 10);
-  doc.setFont('helvetica','bold');
-  let tx = tableX;
-  [
-    {v:'Total', a:'left'},
-    {v:totalOffices, a:'center'},
-    {v:totalDevicesRequired, a:'center'},
-    {v:totalDevicesReceived, a:'center'},
-    {v:totalPending, a:'center'},
-    {v:devicesInstalledRegion, a:'center'},
-    {v:totalPendingInstall, a:'center'},
-    {v:totalIssues, a:'center'},
-    {v:devicesInstalledRegion, a:'center'}, // Completed = Installed
-    {v:`${totalPct}%`, a:'center'},
-  ].forEach((val,i)=>{
-    const col = cols[i];
-    doc.text(String(val.v), tx + (val.a==='left'? 2 : col.w/2), y, { align: val.a==='left'?'left':'center' });
-    tx += col.w;
-  });
-  y += rowH;
-
-  // footer
+  // ----- (H) Footer -----
+  const footerY = pageH - 12;
   doc.setFont('helvetica','normal'); doc.setFontSize(9);
-  doc.text(`Generated on ${dateStr}`, pageW - margin, pageH - 12, { align:'right' });
+  doc.text(`Generated on ${formatDMY(new Date())}`, pageW - margin, footerY, { align:'right' });
+  doc.text(`Page ${pageNo}`, margin, footerY, { align:'left' });
 
-  doc.save(`NKR_POS_Deployment_Report_${today.toISOString().slice(0,10)}.pdf`);
+  // Save
+  const stamp = new Date().toISOString().slice(0,10);
+  doc.save(`NKR_POS_Deployment_Report_${stamp}.pdf`);
 }
+
 
   _pdfSimple(title){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }

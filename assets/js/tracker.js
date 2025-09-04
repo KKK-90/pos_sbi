@@ -275,12 +275,11 @@ class AdvancedPOSTracker {
     return;
   }
 
-  // ---- Region Summary tiles ----
+  // ---- Region Summary tiles (unchanged) ----
   const totalOffices = rows.length;
   const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
   const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
-  // Devices installed = count of "Completed" in Installation Status (spec)
-  const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+  const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length; // per spec
   const overallCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
 
   const summaryHTML = `
@@ -306,6 +305,8 @@ class AdvancedPOSTracker {
     return s && s.toLowerCase() !== "none";
   };
 
+  const tdC = ' style="text-align:center"';
+
   const tableRows = Object.entries(byDiv)
     .sort(([a],[b]) => a.localeCompare(b))
     .map(([division, arr]) => {
@@ -314,18 +315,14 @@ class AdvancedPOSTracker {
       const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
       const pending = Math.max(0, devicesRequired - devicesReceived);
 
-      // Devices installed = count of "Completed" in Installation Status
-      const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+      const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length; // per spec
       const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
 
-      // Issues count (ignores "None", empty, whitespace)
       const issues = arr.filter(x => hasIssue(x.issuesIfAny)).length;
 
-      const completed = devicesInstalled; // separate column as requested
+      const completed = devicesInstalled; // separate column per spec
       const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
 
-      // Center-align all values except first (Division)
-      const tdC = ' style="text-align:center"';
       return `
         <tr>
           <td>${division}</td>
@@ -342,33 +339,9 @@ class AdvancedPOSTracker {
       `;
     }).join("");
 
-  const divisionsHTML = `
-    <div class="section-header" style="margin-top:20px;">
-      <h3 class="section-title">Division-wise Detailed Report</h3>
-    </div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Division</th>
-          <th>Offices</th>
-          <th>Devices Required</th>
-          <th>Devices Received</th>
-          <th>Pending</th>
-          <th>Devices installed</th>
-          <th>Pending for installation</th>
-          <th>Issues</th>
-          <th>Completed</th>
-          <th>Completion %</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
-      </tbody>
-    </table>
-  `;
-
-  host.innerHTML = summaryHTML + divisionsHTML;
-}
+  // ---- Totals row (added) ----
+  const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
+  const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegio
 
   // ---- PDF ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }

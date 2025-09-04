@@ -266,53 +266,102 @@ class AdvancedPOSTracker {
 
   // ---- reports ----
   generateReports(){
-    const divisionStats=this.calculateDivisionStats();
-    const issueLocations=this.getLocationsWithIssues();
-    let html = `
-      <div class="section-header"><h3 class="section-title">Region Summary</h3></div>
-      <div class="stats-grid mb-30">
-        <div class="stat-card"><div class="stat-number">${this.locations.length}</div><div class="stat-label">Total Post Offices</div></div>
-        <div class="stat-card"><div class="stat-number">${this.locations.reduce((s,l)=>s+(l.noOfDevicesReceived||0),0)}</div><div class="stat-label">Total Devices Received</div></div>
-        <div class="stat-card"><div class="stat-number">${Math.round(this.getCompletionRate())}%</div><div class="stat-label">Overall Completion %</div></div>
-      </div>
-      <div class="card mb-30">
-        <h3 style="margin-bottom:20px;color:var(--primary-color);">Division-wise Detailed Report</h3>
-        <table class="data-table"><thead><tr>
-          <th>Division</th><th>Total</th><th>Completed</th><th>In Progress</th><th>Pending</th><th>Issues</th><th>Completion %</th>
-        </tr></thead><tbody>`;
-    for (const [division, s] of Object.entries(divisionStats)) {
-      const pct = s.total? Math.round((s.completed/s.total)*100):0;
-      html+=`<tr><td><strong>${division}</strong></td><td>${s.total}</td><td>${s.completed}</td><td>${s.inProgress}</td><td>${s.pending}</td><td>${s.issues}</td><td><strong>${pct}%</strong></td></tr>`;
-    }
-    html += `</tbody></table></div>`;
-    if (issueLocations.length){
-      html += `
-      <div class="card mb-30">
-        <h3 style="margin-bottom:20px;color:var(--danger-color);">⚠️ Locations with Issues (${issueLocations.length})</h3>
-        <table class="data-table"><thead><tr><th>Post Office</th><th>Division</th><th>Status</th><th>Issues</th><th>Contact</th></tr></thead><tbody>`;
-      issueLocations.forEach(l=>{
-        html += `<tr><td><strong>${l.postOfficeName}</strong></td><td>${l.division}</td><td>${l.installationStatus}</td><td>${l.issuesIfAny}</td><td>${l.contactPersonNo}</td></tr>`;
-      });
-      html += `</tbody></table></div>`;
-    }
-    document.getElementById("reportsContent").innerHTML = html;
-  }
-  calculateDivisionStats(){
-    const s={};
-    this.locations.forEach(l=>{
-      s[l.division] ||= { total:0, completed:0, inProgress:0, pending:0, issues:0 };
-      s[l.division].total++;
-      if (l.installationStatus==="Completed") s[l.division].completed++;
-      else if (["In Progress","Device Received"].includes(l.installationStatus)) s[l.division].inProgress++;
-      else s[l.division].pending++;
-      if (l.issuesIfAny && l.issuesIfAny.trim() && l.issuesIfAny!=="None") s[l.division].issues++;
-    });
-    return s;
-  }
-  getLocationsWithIssues(){ return this.locations.filter(l=> l.issuesIfAny && l.issuesIfAny.trim() && l.issuesIfAny!=="None"); }
-  getCompletionRate(){ if(!this.locations.length) return 0; const completed=this.locations.filter(l=>l.installationStatus==="Completed").length; return (completed/this.locations.length)*100; }
-  printReports(){ window.print(); }
+  const host = document.getElementById("reportsContent");
+  if (!host) return;
 
+  const rows = this.locations || [];
+  if (!rows.length){
+    host.innerHTML = `<div class="alert alert-info">No data available.</div>`;
+    return;
+  }
+
+  // ---- Region Summary tiles ----
+  const totalOffices = rows.length;
+  const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
+  const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
+  // Devices installed = count of "Completed" in Installation Status (spec)
+  const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+  const overallCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
+
+  const summaryHTML = `
+    <div class="section-header"><h3 class="section-title">Region Summary</h3></div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-number">${totalOffices}</div><div class="stat-label">Total Offices</div></div>
+      <div class="stat-card"><div class="stat-number">${totalDevicesRequired}</div><div class="stat-label">Total Devices required</div></div>
+      <div class="stat-card"><div class="stat-number">${totalDevicesReceived}</div><div class="stat-label">Total Devices received</div></div>
+      <div class="stat-card"><div class="stat-number">${overallCompletionPct}%</div><div class="stat-label">Overall completion %</div></div>
+    </div>
+  `;
+
+  // ---- Division-wise Detailed Report ----
+  const byDiv = {};
+  rows.forEach(r => {
+    const d = r.division || "—";
+    (byDiv[d] ||= []).push(r);
+  });
+
+  const tableRows = Object.entries(byDiv)
+    .sort(([a],[b]) => a.localeCompare(b))
+    .map(([division, arr]) => {
+      const offices = arr.length;
+      const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
+      const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
+      const pending = Math.max(0, devicesRequired - devicesReceived);
+
+      // Devices installed = count of "Completed" in Installation Status (spec)
+      const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+      const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
+
+      // Issues = count of non-empty 'issuesIfAny'
+      const issues = arr.filter(x => (x.issuesIfAny||"").toString().trim()).length;
+
+      const completed = devicesInstalled; // same value, separate column per spec
+      const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
+
+      return `
+        <tr>
+          <td>${division}</td>
+          <td>${offices}</td>
+          <td>${devicesRequired}</td>
+          <td>${devicesReceived}</td>
+          <td>${pending}</td>
+          <td>${devicesInstalled}</td>
+          <td>${pendingInstall}</td>
+          <td>${issues}</td>
+          <td>${completed}</td>
+          <td>${completionPct}%</td>
+        </tr>
+      `;
+    }).join("");
+
+  const divisionsHTML = `
+    <div class="section-header" style="margin-top:20px;">
+      <h3 class="section-title">Division-wise Detailed Report</h3>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Division</th>
+          <th>Offices</th>
+          <th>Devices Required</th>
+          <th>Devices Received</th>
+          <th>Pending</th>
+          <th>Devices installed</th>
+          <th>Pending for installation</th>
+          <th>Issues</th>
+          <th>Completed</th>
+          <th>Completion %</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
+      </tbody>
+    </table>
+  `;
+
+  // Render both sections inside the Reports tab only
+  host.innerHTML = summaryHTML + divisionsHTML;
+}
   // ---- PDF ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }

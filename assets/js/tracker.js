@@ -85,10 +85,10 @@ class AdvancedPOSTracker {
     }
     switch (tabName) {
       case "dashboard": this.updateDashboard(); break;
-      case "locations": this.displayLocations(); this.updateFilters(); break; // FIX: id matches
+      case "locations": this.displayLocations(); this.updateFilters(); break;
       case "progress": this.displayProgress(); this.updateProgressFilters(); break;
       case "reports": this.generateReports(); break;
-      case "data-management": this.updateDataStatistics(); break;
+      case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
     }
   }
 
@@ -266,491 +266,463 @@ class AdvancedPOSTracker {
 
   // ---- reports ----
   generateReports(){
-  const host = document.getElementById("reportsContent");
-  if (!host) return;
+    const host = document.getElementById("reportsContent");
+    if (!host) return;
 
-  const rows = this.locations || [];
-  if (!rows.length){
-    host.innerHTML = `<div class="alert alert-info">No data available.</div>`;
-    return;
-  }
+    const rows = this.locations || [];
+    if (!rows.length){
+      host.innerHTML = `<div class="alert alert-info">No data available.</div>`;
+      return;
+    }
 
-  // ---------- Region Summary ----------
-  const totalOffices = rows.length;
-  const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
-  const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
-  const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length; // per spec
-  const overallCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
+    // ---------- Region Summary ----------
+    const totalOffices = rows.length;
+    const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
+    const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
+    const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+    const overallCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
 
-  const summaryHTML = `
-    <div class="section-header"><h3 class="section-title">Region Summary</h3></div>
-    <div class="stats-grid">
-      <div class="stat-card"><div class="stat-number">${totalOffices}</div><div class="stat-label">Total Offices</div></div>
-      <div class="stat-card"><div class="stat-number">${totalDevicesRequired}</div><div class="stat-label">Total Devices required</div></div>
-      <div class="stat-card"><div class="stat-number">${totalDevicesReceived}</div><div class="stat-label">Total Devices received</div></div>
-      <div class="stat-card"><div class="stat-number">${overallCompletionPct}%</div><div class="stat-label">Overall completion %</div></div>
-    </div>
-  `;
-
-  // ---------- Division-wise Detailed Report ----------
-  const byDiv = {};
-  rows.forEach(r => {
-    const d = r.division || "—";
-    (byDiv[d] ||= []).push(r);
-  });
-
-  // issue present = non-empty and not "None" (case-insensitive)
-  const hasIssue = (v)=>{
-    const s = (v ?? "").toString().trim();
-    return s && s.toLowerCase() !== "none";
-  };
-
-  const tdC = ' style="text-align:center"';
-
-  const tableRows = Object.entries(byDiv)
-    .sort(([a],[b]) => a.localeCompare(b))
-    .map(([division, arr]) => {
-      const offices = arr.length;
-      const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
-      const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
-      const pending = Math.max(0, devicesRequired - devicesReceived);
-
-      const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length; // per spec
-      const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
-
-      const issues = arr.filter(x => hasIssue(x.issuesIfAny)).length;
-
-      const completed = devicesInstalled; // separate column per spec
-      const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
-
-      return `
-        <tr>
-          <td>${division}</td>
-          <td${tdC}>${offices}</td>
-          <td${tdC}>${devicesRequired}</td>
-          <td${tdC}>${devicesReceived}</td>
-          <td${tdC}>${pending}</td>
-          <td${tdC}>${devicesInstalled}</td>
-          <td${tdC}>${pendingInstall}</td>
-          <td${tdC}>${issues}</td>
-          <td${tdC}>${completed}</td>
-          <td${tdC}>${completionPct}%</td>
-        </tr>
-      `;
-    }).join("");
-
-  // Totals row
-  const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
-  const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegion);
-  const totalIssues = rows.filter(x => hasIssue(x.issuesIfAny)).length;
-  const totalCompleted = devicesInstalledRegion;
-  const totalCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
-
-  const totalRow = `
-    <tr class="total-row">
-      <td><strong>Total</strong></td>
-      <td${tdC}><strong>${totalOffices}</strong></td>
-      <td${tdC}><strong>${totalDevicesRequired}</strong></td>
-      <td${tdC}><strong>${totalDevicesReceived}</strong></td>
-      <td${tdC}><strong>${totalPending}</strong></td>
-      <td${tdC}><strong>${devicesInstalledRegion}</strong></td>
-      <td${tdC}><strong>${totalPendingInstall}</strong></td>
-      <td${tdC}><strong>${totalIssues}</strong></td>
-      <td${tdC}><strong>${totalCompleted}</strong></td>
-      <td${tdC}><strong>${totalCompletionPct}%</strong></td>
-    </tr>
-  `;
-
-  const divisionsHTML = `
-    <div class="section-header" style="margin-top:20px;">
-      <h3 class="section-title">Division-wise Detailed Report</h3>
-    </div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Division</th>
-          <th>Offices</th>
-          <th>Devices Required</th>
-          <th>Devices Received</th>
-          <th>Pending</th>
-          <th>Devices installed</th>
-          <th>Installation pending</th>
-          <th>Issues</th>
-          <th>Completed</th>
-          <th>Completion %</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
-        ${totalRow}
-      </tbody>
-    </table>
-  `;
-
-  // ---------- ⚠️ Locations with Issues (restored) ----------
-  const issuesList = rows.filter(r => hasIssue(r.issuesIfAny));
-  let issuesHTML = "";
-  if (issuesList.length){
-    const items = issuesList
-      .sort((a,b)=> (a.division||"").localeCompare(b.division||"") || (a.postOfficeName||"").localeCompare(b.postOfficeName||""))
-      .map(l => `
-        <tr>
-          <td>${l.postOfficeName || ""}</td>
-          <td>${l.division || ""}</td>
-          <td style="text-align:center">${l.installationStatus || ""}</td>
-          <td>${(l.issuesIfAny||"").toString().trim()}</td>
-          <td style="text-align:center">${l.contactPersonNo || ""}</td>
-        </tr>
-      `).join("");
-
-    issuesHTML = `
-      <div class="card mb-30" style="margin-top:20px;">
-        <h3 style="margin-bottom:20px;color:var(--danger-color);">⚠️ Locations with Issues (${issuesList.length})</h3>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Post Office</th>
-                <th>Division</th>
-                <th>Status</th>
-                <th>Issues</th>
-                <th>Contact</th>
-              </tr>
-            </thead>
-            <tbody>${items}</tbody>
-          </table>
-        </div>
+    const summaryHTML = `
+      <div class="section-header"><h3 class="section-title">Region Summary</h3></div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-number">${totalOffices}</div><div class="stat-label">Total Offices</div></div>
+        <div class="stat-card"><div class="stat-number">${totalDevicesRequired}</div><div class="stat-label">Total Devices required</div></div>
+        <div class="stat-card"><div class="stat-number">${totalDevicesReceived}</div><div class="stat-label">Total Devices received</div></div>
+        <div class="stat-card"><div class="stat-number">${overallCompletionPct}%</div><div class="stat-label">Overall completion %</div></div>
       </div>
     `;
-  }
 
-  host.innerHTML = summaryHTML + divisionsHTML + issuesHTML;
-}
+    // ---------- Division-wise Detailed Report ----------
+    const byDiv = {};
+    rows.forEach(r => {
+      const d = r.division || "—";
+      (byDiv[d] ||= []).push(r);
+    });
+
+    const hasIssue = (v)=>{
+      const s = (v ?? "").toString().trim();
+      return s && s.toLowerCase() !== "none";
+    };
+
+    const tdC = ' style="text-align:center"';
+
+    const tableRows = Object.entries(byDiv)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([division, arr]) => {
+        const offices = arr.length;
+        const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
+        const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
+        const pending = Math.max(0, devicesRequired - devicesReceived);
+
+        const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+        const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
+
+        const issues = arr.filter(x => hasIssue(x.issuesIfAny)).length;
+
+        const completed = devicesInstalled;
+        const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
+
+        return `
+          <tr>
+            <td>${division}</td>
+            <td${tdC}>${offices}</td>
+            <td${tdC}>${devicesRequired}</td>
+            <td${tdC}>${devicesReceived}</td>
+            <td${tdC}>${pending}</td>
+            <td${tdC}>${devicesInstalled}</td>
+            <td${tdC}>${pendingInstall}</td>
+            <td${tdC}>${issues}</td>
+            <td${tdC}>${completed}</td>
+            <td${tdC}>${completionPct}%</td>
+          </tr>
+        `;
+      }).join("");
+
+    // Totals row
+    const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
+    const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegion);
+    const totalIssues = rows.filter(x => hasIssue(x.issuesIfAny)).length;
+    const totalCompleted = devicesInstalledRegion;
+    const totalCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
+
+    const totalRow = `
+      <tr class="total-row">
+        <td><strong>Total</strong></td>
+        <td${tdC}><strong>${totalOffices}</strong></td>
+        <td${tdC}><strong>${totalDevicesRequired}</strong></td>
+        <td${tdC}><strong>${totalDevicesReceived}</strong></td>
+        <td${tdC}><strong>${totalPending}</strong></td>
+        <td${tdC}><strong>${devicesInstalledRegion}</strong></td>
+        <td${tdC}><strong>${totalPendingInstall}</strong></td>
+        <td${tdC}><strong>${totalIssues}</strong></td>
+        <td${tdC}><strong>${totalCompleted}</strong></td>
+        <td${tdC}><strong>${totalCompletionPct}%</strong></td>
+      </tr>
+    `;
+
+    const divisionsHTML = `
+      <div class="section-header" style="margin-top:20px;">
+        <h3 class="section-title">Division-wise Detailed Report</h3>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Division</th>
+            <th>Offices</th>
+            <th>Devices Required</th>
+            <th>Devices Received</th>
+            <th>Pending</th>
+            <th>Devices installed</th>
+            <th>Pending for installation</th>
+            <th>Issues</th>
+            <th>Completed</th>
+            <th>Completion %</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
+          ${totalRow}
+        </tbody>
+      </table>
+    `;
+
+    // ---------- ⚠️ Locations with Issues ----------
+    const issuesList = rows.filter(r => hasIssue(r.issuesIfAny));
+    let issuesHTML = "";
+    if (issuesList.length){
+      const items = issuesList
+        .sort((a,b)=> (a.division||"").localeCompare(b.division||"") || (a.postOfficeName||"").localeCompare(b.postOfficeName||""))
+        .map(l => `
+          <tr>
+            <td>${l.postOfficeName || ""}</td>
+            <td>${l.division || ""}</td>
+            <td style="text-align:center">${l.installationStatus || ""}</td>
+            <td>${(l.issuesIfAny||"").toString().trim()}</td>
+            <td style="text-align:center">${l.contactPersonNo || ""}</td>
+          </tr>
+        `).join("");
+
+      issuesHTML = `
+        <div class="card mb-30" style="margin-top:20px;">
+          <h3 style="margin-bottom:20px;color:var(--danger-color);">⚠️ Locations with Issues (${issuesList.length})</h3>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Post Office</th>
+                  <th>Division</th>
+                  <th>Status</th>
+                  <th>Issues</th>
+                  <th>Contact</th>
+                </tr>
+              </thead>
+              <tbody>${items}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    host.innerHTML = summaryHTML + divisionsHTML + issuesHTML;
+  }
 
   // ---- PDF ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
+
+  // Professional reports PDF with orientation chooser, DD/MM/YYYY dates, light header fill, uniform header background,
+  // vertically centered cells, and "Devices received today" in Region Summary.
   exportReportsPDF(opts){
-  if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
-  const { jsPDF } = window.jspdf;
+    if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
+    const { jsPDF } = window.jspdf;
 
-  // ---------- Show orientation chooser (radio buttons) ----------
-  if (!opts || !opts.orientation){
-    const id = "pdf-orient-overlay";
-    if (document.getElementById(id)) return; // already open
-    const overlay = document.createElement("div");
-    overlay.id = id;
-    overlay.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
-        <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:20px 22px;width:340px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
-          <h3 style="margin:0 0 8px;font-size:16px;color:#2c3e50;">Export Reports PDF</h3>
-          <p style="margin:0 0 12px;font-size:13px;color:#34495e;">Choose orientation:</p>
-          <div style="display:flex;gap:12px;margin:0 0 16px;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-              <input type="radio" name="pdf-orient" value="portrait"> Portrait
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-              <input type="radio" name="pdf-orient" value="landscape" checked> Landscape
-            </label>
+    // Orientation chooser (radio buttons)
+    if (!opts || !opts.orientation){
+      const id = "pdf-orient-overlay";
+      if (document.getElementById(id)) return; // already open
+      const overlay = document.createElement("div");
+      overlay.id = id;
+      overlay.innerHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
+          <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:20px 22px;width:340px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+            <h3 style="margin:0 0 8px;font-size:16px;color:#2c3e50;">Export Reports PDF</h3>
+            <p style="margin:0 0 12px;font-size:13px;color:#34495e;">Choose orientation:</p>
+            <div style="display:flex;gap:12px;margin:0 0 16px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input type="radio" name="pdf-orient" value="portrait"> Portrait
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input type="radio" name="pdf-orient" value="landscape" checked> Landscape
+              </label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;">
+              <button id="pdf-orient-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
+              <button id="pdf-orient-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Generate</button>
+            </div>
           </div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;">
-            <button id="pdf-orient-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
-            <button id="pdf-orient-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Generate</button>
-          </div>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    overlay.querySelector("#pdf-orient-cancel").onclick = ()=> overlay.remove();
-    overlay.querySelector("#pdf-orient-generate").onclick = ()=>{
-      const sel = overlay.querySelector('input[name="pdf-orient"]:checked')?.value || "landscape";
-      overlay.remove();
-      // Re-call with chosen orientation
-      this.exportReportsPDF({ orientation: sel });
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector("#pdf-orient-cancel").onclick = ()=> overlay.remove();
+      overlay.querySelector("#pdf-orient-generate").onclick = ()=>{
+        const sel = overlay.querySelector('input[name="pdf-orient"]:checked')?.value || "landscape";
+        overlay.remove();
+        this.exportReportsPDF({ orientation: sel });
+      };
+      return;
+    }
+
+    // Setup / helpers
+    const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
+    const formatDMY = (d)=> {
+      const dd = String(d.getDate()).padStart(2,"0");
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
     };
-    return;
-  }
+    const toInt = v => parseInt(v) || 0;
+    const normalizeToDMY = (val)=>{
+      if (!val) return null;
+      const t = String(val).trim();
+      let dd, mm, yyyy;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(t)){ [yyyy,mm,dd] = t.split("-"); }
+      else if (/^\d{2}\/\d{2}\/\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("/"); }
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("-"); }
+      else { const d=new Date(t); return isNaN(d)? null: formatDMY(d); }
+      return `${dd.padStart(2,"0")}/${mm.padStart(2,"0")}/${yyyy}`;
+    };
 
-  // ---------- Setup / helpers ----------
-  const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
-  const formatDMY = (d)=> {
-    const dd = String(d.getDate()).padStart(2,"0");
-    const mm = String(d.getMonth()+1).padStart(2,"0");
-    const yyyy = d.getFullYear();
-    return `${dd}/${mm}/${yyyy}`;
-  };
-  const toInt = v => parseInt(v) || 0;
-  const normalizeToDMY = (val)=>{
-    if (!val) return null;
-    const t = String(val).trim();
-    let dd, mm, yyyy;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(t)){ [yyyy,mm,dd] = t.split("-"); }
-    else if (/^\d{2}\/\d{2}\/\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("/"); }
-    else if (/^\d{2}-\d{2}-\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("-"); }
-    else { const d=new Date(t); return isNaN(d)? null: formatDMY(d); }
-    return `${dd.padStart(2,"0")}/${mm.padStart(2,"0")}/${yyyy}`;
-  };
+    const rows = this.locations || [];
+    const today = new Date();
+    const reportDateStr = formatDMY(today);
 
-  const rows = this.locations || [];
-  const today = new Date();
-  const reportDateStr = formatDMY(today);
+    // Aggregates
+    const totalOffices = rows.length;
+    const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
+    const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
+    const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+    const devicesReceivedToday = rows.reduce((s,l)=> {
+      return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
+    }, 0);
 
-  // Aggregates (compact for 1 page)
-  const totalOffices = rows.length;
-  const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
-  const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
-  const devicesReceivedToday = rows.reduce((s,l)=> {
-    return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
-  }, 0);
+    // Group by division
+    const byDiv = {};
+    rows.forEach(r=>{
+      const d = r.division || "—";
+      (byDiv[d] ||= []).push(r);
+    });
 
-  // Group by division
-  const byDiv = {};
-  rows.forEach(r=>{
-    const d = r.division || "—";
-    (byDiv[d] ||= []).push(r);
-  });
+    // Rows for table
+    const divisions = Object.entries(byDiv).sort(([a],[b]) => a.localeCompare(b)).map(([division, arr])=>{
+      const offices = arr.length;
+      const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
+      const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
+      const pend = Math.max(0, req - rec);
+      const inst = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+      const pinst = Math.max(0, rec - inst);
+      const iss = arr.filter(x => {
+        const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
+        return t && t !== "none";
+      }).length;
+      const comp = inst;
+      const pct = req ? Math.round((inst/req)*100) : 0;
+      return { division, offices, req, rec, pend, inst, pinst, iss, comp, pct };
+    });
 
-  // Flatten for table rows (short labels to keep single page)
-  const divisions = Object.entries(byDiv).sort(([a],[b]) => a.localeCompare(b)).map(([division, arr])=>{
-    const offices = arr.length;
-    const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
-    const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
-    const pend = Math.max(0, req - rec);
-    const inst = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
-    const pinst = Math.max(0, rec - inst);
-    const iss = arr.filter(x => {
-      const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
-      return t && t !== "none";
-    }).length;
-    const comp = inst;
-    const pct = req ? Math.round((inst/req)*100) : 0;
-    return { division, offices, req, rec, pend, inst, pinst, iss, comp, pct };
-  });
+    const totalsRow = {
+      division: "Total",
+      offices: totalOffices,
+      req: totalDevicesRequired,
+      rec: totalDevicesReceived,
+      pend: Math.max(0, totalDevicesRequired - totalDevicesReceived),
+      inst: devicesInstalledRegion,
+      pinst: Math.max(0, totalDevicesReceived - devicesInstalledRegion),
+      iss: rows.filter(x => {
+        const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
+        return t && t !== "none";
+      }).length,
+      comp: devicesInstalledRegion,
+      pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
+    };
 
-  const totalsRow = {
-    division: "Total",
-    offices: totalOffices,
-    req: totalDevicesRequired,
-    rec: totalDevicesReceived,
-    pend: Math.max(0, totalDevicesRequired - totalDevicesReceived),
-    inst: rows.filter(r => (r.installationStatus||"").trim() === "Completed").length,
-    pinst: Math.max(0, totalDevicesReceived - rows.filter(r => (r.installationStatus||"").trim() === "Completed").length),
-    iss: rows.filter(x => {
-      const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
-      return t && t !== "none";
-    }).length,
-    comp: rows.filter(r => (r.installationStatus||"").trim() === "Completed").length,
-    pct: totalDevicesRequired ? Math.round((rows.filter(r => (r.installationStatus||"").trim() === "Completed").length / totalDevicesRequired) * 100) : 0
-  };
+    // PDF doc
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 32;
+    let y = margin;
 
-  // ---------- PDF doc ----------
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 32;
-  let y = margin;
+    // Colors / fonts
+    const headerFill = { r: 246, g: 248, b: 252 };  // light, professional
+    const stripeFill = { r: 252, g: 253, b: 255 };  // subtle zebra
+    const borderGray = 180;
+    const brandBlue = { r: 52, g: 152, b: 219 };
 
-  // Colors / fonts (lighter header fill)
-  const headerFill = { r: 246, g: 248, b: 252 };  // very light
-  const stripeFill = { r: 252, g: 253, b: 255 };  // subtle zebra
-  const borderGray = 180;
-  const brandBlue = { r: 52, g: 152, b: 219 };
+    const fontTitle = 15;
+    const fontSub   = 11;
+    const fontHead  = 9.5;   // compact for single-page fit
+    const fontBody  = 9;
+    const lineH     = 11;
+    const padX      = 6;
 
-  const fontTitle = 15;
-  const fontSub   = 11;
-  const fontHead  = 9.5;   // compact for 1 page
-  const fontBody  = 9;
-  const lineH     = 11;    // compact line height
-  const padX      = 6;
+    // Table columns
+    const tableCols = [
+      { key:'division', label:'Division', ratio:0.21, align:'left'  },
+      { key:'offices',  label:'Offices', ratio:0.07, align:'center'},
+      { key:'req',      label:'Devices Required', ratio:0.11, align:'center'},
+      { key:'rec',      label:'Devices Received', ratio:0.11, align:'center'},
+      { key:'pend',     label:'Pending', ratio:0.08, align:'center'},
+      { key:'inst',     label:'Devices Installed', ratio:0.11, align:'center'},
+      { key:'pinst',    label:'Pending Install', ratio:0.13, align:'center'},
+      { key:'iss',      label:'Issues', ratio:0.06, align:'center'},
+      { key:'comp',     label:'Completed', ratio:0.06, align:'center'},
+      { key:'pct',      label:'Completion %', ratio:0.06, align:'center'},
+    ];
+    const tableX = margin;
+    const tableW = pageW - margin*2;
+    tableCols.forEach(c => c.w = Math.floor(c.ratio * tableW));
 
-  // Table columns (ratios → widths)
-  const tableCols = [
-    { key:'division', label:'Division', ratio:0.21, align:'left'  },
-    { key:'offices',  label:'Offices', ratio:0.07, align:'center'},
-    { key:'req',      label:'Devices Required', ratio:0.11, align:'center'},
-    { key:'rec',      label:'Devices Received', ratio:0.11, align:'center'},
-    { key:'pend',     label:'Pending', ratio:0.08, align:'center'},
-    { key:'inst',     label:'Devices Installed', ratio:0.11, align:'center'},
-    { key:'pinst',    label:'Pending Install', ratio:0.13, align:'center'},
-    { key:'iss',      label:'Issues', ratio:0.06, align:'center'},
-    { key:'comp',     label:'Completed', ratio:0.06, align:'center'},
-    { key:'pct',      label:'Completion %', ratio:0.06, align:'center'},
-  ];
-  const tableX = margin;
-  const tableW = pageW - margin*2;
-  tableCols.forEach(c => c.w = Math.floor(c.ratio * tableW));
-
-  // Helpers
-  function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
-  function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
-  function newPage(){
-    doc.addPage(); y = margin; drawHeader();
-  }
-  function centerBlockY(rowTop, rowH, lines){
-    // compute the top y for first line to vertically center block of text
-    const contentH = Math.max(lineH, lines.length * lineH);
-    return rowTop + (rowH - contentH)/2 + lineH*0.85; // baseline tweak
-  }
-
-  // Header
-  function drawHeader(){
-    doc.setFont('helvetica','bold'); doc.setFontSize(fontTitle);
-    doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
-    doc.text('North Karnataka Region', margin, y); y += 18;
-
-    doc.setTextColor(0,0,0);
-    doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
-    doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
-    doc.text(`Report for the date: ${reportDateStr}`, margin, y); y += 8;
-
-    setBorder(); doc.line(margin, y, pageW - margin, y); y += 16;
-  }
-  drawHeader();
-
-  // Region Summary (two columns to save space) — replaces Overall % with "Devices received today"
-  doc.setFont('helvetica','bold'); doc.setFontSize(12);
-  doc.text('Region Summary', margin, y); y += 12;
-
-  doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
-  const rsLeft = [
-    ['Total Offices', String(totalOffices)],
-    ['Total Devices required', String(totalDevicesRequired)]
-  ];
-  const rsRight = [
-    ['Total Devices received', String(totalDevicesReceived)],
-    ['Devices received today', String(devicesReceivedToday)]
-  ];
-  const colGap = 260; // distance between left label and right label blocks
-  const valOffset = 190; // value alignment relative to each column start
-
-  rsLeft.forEach(([k,v],i)=>{
-    ensureSpace(14);
-    doc.text(`${k}:`, margin, y);
-    doc.text(v, margin + valOffset, y, { align:'right' });
-    // draw right side in the same row when possible
-    const pair = rsRight[i];
-    if (pair){
-      doc.text(`${pair[0]}:`, margin + colGap, y);
-      doc.text(pair[1], margin + colGap + valOffset, y, { align:'right' });
+    // Helpers
+    function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
+    function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
+    function newPage(){ doc.addPage(); y = margin; drawHeader(); }
+    function centerBlockY(rowTop, rowH, lines){
+      const contentH = Math.max(lineH, lines.length * lineH);
+      return rowTop + (rowH - contentH)/2 + lineH*0.85;
     }
-    y += 14;
-  });
-  y += 6;
 
-  // Table header
-  // --- REPLACE JUST THIS FUNCTION inside exportReportsPDF() ---
-function drawTableHeader(){
-  // Calculate needed height (supports wrapped labels)
-  ensureSpace(24);
-  const headerHeights = tableCols.map(c => {
-    const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-    return Math.max(18, lines.length * lineH + 6);
-  });
-  const headerH = Math.max(...headerHeights);
+    // Header
+    function drawHeader(){
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontTitle);
+      doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
+      doc.text('North Karnataka Region', margin, y); y += 18;
 
-  // 1) Single full-width background (same color for all header cells)
-  doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
-  doc.rect(tableX, y, tableW, headerH, 'F');
+      doc.setTextColor(0,0,0);
+      doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
+      doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
+      doc.text(`Report for the date: ${reportDateStr}`, margin, y); y += 8;
 
-  // 2) Cell borders + text
-  setBorder();
-  let x = tableX;
-  tableCols.forEach(c=>{
-    // stroke cell box (no per-cell fill, so the background stays uniform)
-    doc.rect(x, y, c.w, headerH, 'S');
-
-    // header text (vertically centered, wrapped if needed)
-    doc.setFont('helvetica','bold'); 
-    doc.setFontSize(fontHead);
-    const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-    const startY = centerBlockY(y, headerH, lines);
-
-    if (c.align === 'left'){
-      doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
-    } else {
-      lines.forEach((ln,i)=> doc.text(ln, x + c.w/2, startY + i*lineH, { align:'center' }));
+      setBorder(); doc.line(margin, y, pageW - margin, y); y += 16;
     }
-    x += c.w;
-  });
+    drawHeader();
 
-  y += headerH;
-}
+    // Region Summary (two columns) — uses "Devices received today"
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('Region Summary', margin, y); y += 12;
 
-    // cells
-    tableCols.forEach(c=>{
-      doc.rect(x, y, c.w, headerH, 'FD'); // fill + stroke
-      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-      const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-      const startY = centerBlockY(y, headerH, lines);
-      if (c.align === 'left'){
-        doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
-      } else {
-        lines.forEach((ln,i)=> doc.text(ln, x + c.w/2, startY + i*lineH, { align:'center' }));
+    doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
+    const rsLeft = [
+      ['Total Offices', String(totalOffices)],
+      ['Total Devices required', String(totalDevicesRequired)]
+    ];
+    const rsRight = [
+      ['Total Devices received', String(totalDevicesReceived)],
+      ['Devices received today', String(devicesReceivedToday)]
+    ];
+    const colGap = 260; // right column group start
+    const valOffset = 190; // value alignment width
+
+    rsLeft.forEach(([k,v],i)=>{
+      ensureSpace(14);
+      doc.text(`${k}:`, margin, y);
+      doc.text(v, margin + valOffset, y, { align:'right' });
+      const pair = rsRight[i];
+      if (pair){
+        doc.text(`${pair[0]}:`, margin + colGap, y);
+        doc.text(pair[1], margin + colGap + valOffset, y, { align:'right' });
       }
-      x += c.w;
+      y += 14;
     });
-    y += headerH;
-  }
+    y += 6;
 
-  // Table row
-  function drawRow(obj, stripe=false, bold=false){
-    // compute wrapped text & row height
-    const cells = tableCols.map(col=>{
-      const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
-      const lines = doc.splitTextToSize(raw, col.w - padX*2);
-      const h = Math.max(16, lines.length * lineH + 6);
-      return { col, lines, h };
-    });
-    const rowH = Math.max(...cells.map(c => c.h));
-    ensureSpace(rowH);
+    // Table header (uniform background across the whole header row)
+    function drawTableHeader(){
+      ensureSpace(24);
+      setBorder();
+      // compute header height from wrapped labels
+      const headerHeights = tableCols.map(c => {
+        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+        return Math.max(18, lines.length * lineH + 6);
+      });
+      const headerH = Math.max(...headerHeights);
 
-    if (stripe){
-      doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
-      doc.rect(tableX, y, tableW, rowH, 'F');
+      // Single full-width background
+      doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
+      doc.rect(tableX, y, tableW, headerH, 'F');
+
+      // Per-cell borders + text
+      let x = tableX;
+      tableCols.forEach(c=>{
+        doc.rect(x, y, c.w, headerH, 'S');
+        doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+        const startY = centerBlockY(y, headerH, lines);
+        if (c.align === 'left'){
+          doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
+        } else {
+          lines.forEach((ln,i)=> doc.text(ln, x + c.w/2, startY + i*lineH, { align:'center' }));
+        }
+        x += c.w;
+      });
+
+      y += headerH;
     }
-    setBorder();
-    let x = tableX;
-    cells.forEach(({col,lines})=>{
-      // cell border
-      doc.rect(x, y, col.w, rowH, 'S');
-      // text
-      doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
-      const startY = centerBlockY(y, rowH, lines); // vertical center
-      if (col.align === 'left'){
-        doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
-      } else {
-        lines.forEach((ln,i)=> doc.text(ln, x + col.w/2, startY + i*lineH, { align:'center' }));
+
+    // Table row
+    function drawRow(obj, stripe=false, bold=false){
+      const cells = tableCols.map(col=>{
+        const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
+        const lines = doc.splitTextToSize(raw, col.w - padX*2);
+        const h = Math.max(16, lines.length * lineH + 6);
+        return { col, lines, h };
+      });
+      const rowH = Math.max(...cells.map(c => c.h));
+      ensureSpace(rowH);
+
+      if (stripe){
+        doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
+        doc.rect(tableX, y, tableW, rowH, 'F');
       }
-      x += col.w;
+      setBorder();
+      let x = tableX;
+      cells.forEach(({col,lines})=>{
+        doc.rect(x, y, col.w, rowH, 'S');
+        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
+        const startY = centerBlockY(y, rowH, lines);
+        if (col.align === 'left'){
+          doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
+        } else {
+          lines.forEach((ln,i)=> doc.text(ln, x + col.w/2, startY + i*lineH, { align:'center' }));
+        }
+        x += col.w;
+      });
+      y += rowH;
+    }
+
+    // Render table
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('Division-wise Detailed Report', margin, y); y += 8;
+    drawTableHeader();
+
+    divisions.forEach((r, idx) => {
+      if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
+      drawRow(r, idx % 2 === 1);
     });
-    y += rowH;
-  }
-
-  // Render table
-  doc.setFont('helvetica','bold'); doc.setFontSize(12);
-  doc.text('Division-wise Detailed Report', margin, y); y += 8;
-  drawTableHeader();
-
-  divisions.forEach((r, idx) => {
+    // Totals row
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
-    drawRow(r, idx % 2 === 1);
-  });
-  // Totals row in bold
-  if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
-  drawRow(totalsRow, false, true);
+    drawRow(totalsRow, false, true);
 
-  // Footer (page numbers + date) on every page
-  const pages = doc.getNumberOfPages();
-  for (let i=1; i<=pages; i++){
-    doc.setPage(i);
-    doc.setFont('helvetica','normal'); doc.setFontSize(9);
-    doc.text(`Generated on ${reportDateStr}`, pageW - margin, pageH - 12, { align:'right' });
-    doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'left' });
+    // Footer: page numbers + date on every page
+    const pages = doc.getNumberOfPages();
+    for (let i=1; i<=pages; i++){
+      doc.setPage(i);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9);
+      doc.text(`Generated on ${reportDateStr}`, pageW - margin, pageH - 12, { align:'right' });
+      doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'left' });
+    }
+
+    const stamp = new Date().toISOString().slice(0,10);
+    doc.save(`NKR_POS_Deployment_Report_${stamp}.pdf`);
   }
-
-  const stamp = new Date().toISOString().slice(0,10);
-  doc.save(`NKR_POS_Deployment_Report_${stamp}.pdf`);
-}
-
 
   _pdfSimple(title){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
@@ -812,7 +784,7 @@ function drawTableHeader(){
   }
   exportCurrentData(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPORTED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
     const rows=this.locations.map(l=>[
       l.slNo||'',l.division||'',l.postOfficeName||'',l.postOfficeId||'',l.officeType||'',
       l.contactPersonName||'',l.contactPersonNo||'',l.altContactNo||'',l.contactEmail||'',

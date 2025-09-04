@@ -300,6 +300,12 @@ class AdvancedPOSTracker {
     (byDiv[d] ||= []).push(r);
   });
 
+  // helper: issue present = non-empty and not "None" (case-insensitive)
+  const hasIssue = (v)=>{
+    const s = (v ?? "").toString().trim();
+    return s && s.toLowerCase() !== "none";
+  };
+
   const tableRows = Object.entries(byDiv)
     .sort(([a],[b]) => a.localeCompare(b))
     .map(([division, arr]) => {
@@ -308,28 +314,30 @@ class AdvancedPOSTracker {
       const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
       const pending = Math.max(0, devicesRequired - devicesReceived);
 
-      // Devices installed = count of "Completed" in Installation Status (spec)
+      // Devices installed = count of "Completed" in Installation Status
       const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
       const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
 
-      // Issues = count of non-empty 'issuesIfAny'
-      const issues = arr.filter(x => (x.issuesIfAny||"").toString().trim()).length;
+      // Issues count (ignores "None", empty, whitespace)
+      const issues = arr.filter(x => hasIssue(x.issuesIfAny)).length;
 
-      const completed = devicesInstalled; // same value, separate column per spec
+      const completed = devicesInstalled; // separate column as requested
       const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
 
+      // Center-align all values except first (Division)
+      const tdC = ' style="text-align:center"';
       return `
         <tr>
           <td>${division}</td>
-          <td>${offices}</td>
-          <td>${devicesRequired}</td>
-          <td>${devicesReceived}</td>
-          <td>${pending}</td>
-          <td>${devicesInstalled}</td>
-          <td>${pendingInstall}</td>
-          <td>${issues}</td>
-          <td>${completed}</td>
-          <td>${completionPct}%</td>
+          <td${tdC}>${offices}</td>
+          <td${tdC}>${devicesRequired}</td>
+          <td${tdC}>${devicesReceived}</td>
+          <td${tdC}>${pending}</td>
+          <td${tdC}>${devicesInstalled}</td>
+          <td${tdC}>${pendingInstall}</td>
+          <td${tdC}>${issues}</td>
+          <td${tdC}>${completed}</td>
+          <td${tdC}>${completionPct}%</td>
         </tr>
       `;
     }).join("");
@@ -359,9 +367,9 @@ class AdvancedPOSTracker {
     </table>
   `;
 
-  // Render both sections inside the Reports tab only
   host.innerHTML = summaryHTML + divisionsHTML;
 }
+
   // ---- PDF ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }

@@ -585,7 +585,7 @@ class AdvancedPOSTracker {
       { key:'rec',      label:'Devices Received', align:'center'},
       { key:'pend',     label:'Pending', align:'center'},
       { key:'inst',     label:'Devices Installed', align:'center'},
-      { key:'pinst',    label:'Pending Install', align:'center'},
+      { key:'pinst',    label:'Pending Installation', align:'center'},
       { key:'iss',      label:'Issues', align:'center'},
       { key:'comp',     label:'Completed', align:'center'},
       { key:'pct',      label:'Completion %', align:'center'},

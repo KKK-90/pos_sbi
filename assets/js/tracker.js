@@ -9,9 +9,6 @@ class AdvancedPOSTracker {
     this.importData = [];
     this.users = ["KARNA", "NKR", "SKR", "BGR", "SBI_DOP"];
     this.storageKey = "advancedPOSTrackerData";
-
-    // Admins who can upload documents in Office-wise "Documents" column
-    this.adminUsers = ["KARNA", "NKR", "SBI_DOP"];
   }
 
   async init() {
@@ -23,12 +20,7 @@ class AdvancedPOSTracker {
         if (resp.ok) {
           const seed = await resp.json();
           if (Array.isArray(seed) && seed.length) {
-            this.locations = seed.map((loc, i) => ({
-              ...loc,
-              id: i + 1,
-              slNo: i + 1,
-              attachments: loc.attachments || []
-            }));
+            this.locations = seed.map((loc, i) => ({ ...loc, id: i + 1, slNo: i + 1 }));
             this.nextLocationId = this.locations.length + 1;
             this.saveToStorage();
           }
@@ -38,7 +30,6 @@ class AdvancedPOSTracker {
       }
     }
     this.checkLoginStatus();
-    this._inited = true;
   }
 
   // ---- session / UI ----
@@ -62,14 +53,13 @@ class AdvancedPOSTracker {
     this.showLoginScreen();
   }
   showLoginScreen() {
-    document.getElementById("loginScreen")?.classList.remove("hidden");
-    document.getElementById("mainApp")?.classList.add("hidden");
+    document.getElementById("loginScreen").classList.remove("hidden");
+    document.getElementById("mainApp").classList.add("hidden");
   }
   showMainApp() {
-    document.getElementById("loginScreen")?.classList.add("hidden");
-    document.getElementById("mainApp")?.classList.remove("hidden");
-    const cu = document.getElementById("currentUser");
-    if (cu) cu.textContent = this.currentUser || "User";
+    document.getElementById("loginScreen").classList.add("hidden");
+    document.getElementById("mainApp").classList.remove("hidden");
+    document.getElementById("currentUser").textContent = this.currentUser || "User";
     this.setupEventListeners();
     this.showTab(null, "dashboard");
     this.updateDashboard();
@@ -98,18 +88,13 @@ class AdvancedPOSTracker {
       case "locations": this.displayLocations(); this.updateFilters(); break;
       case "progress": this.displayProgress(); this.updateProgressFilters(); break;
       case "reports": this.generateReports(); break;
-      case "office-details": this.renderOfficeDetails(); break;
       case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
     }
   }
 
   // ---- storage ----
   saveToStorage() {
-    const data = {
-      locations: this.locations,
-      nextLocationId: this.nextLocationId,
-      lastSaved: new Date().toISOString()
-    };
+    const data = { locations: this.locations, nextLocationId: this.nextLocationId, lastSaved: new Date().toISOString() };
     localStorage.setItem(this.storageKey, JSON.stringify(data));
   }
   loadFromStorage() {
@@ -117,7 +102,7 @@ class AdvancedPOSTracker {
     if (!raw) return;
     try {
       const data = JSON.parse(raw);
-      this.locations = (data.locations || []).map(l => ({ attachments: [], ...l }));
+      this.locations = data.locations || [];
       this.nextLocationId = data.nextLocationId || 1;
     } catch { /* ignore */ }
   }
@@ -128,10 +113,7 @@ class AdvancedPOSTracker {
     const totalLocations = this.locations.length;
     const totalDevicesDeployed = this.locations.reduce((sum, l) => sum + (parseInt(l.noOfDevicesReceived) || 0), 0);
     const pending = this.locations.filter(l => l.installationStatus === "Pending").length;
-    const withIssues = this.locations.filter(l => {
-      const t = (l.issuesIfAny || "").toString().trim().toLowerCase();
-      return t && t !== "none";
-    }).length;
+    const withIssues = this.locations.filter(l => l.issuesIfAny && l.issuesIfAny.trim() && l.issuesIfAny !== "None").length;
     document.getElementById("overallStats").innerHTML = `
       <div class="stat-card"><div class="stat-number">${totalLocations}</div><div class="stat-label">Total Locations</div></div>
       <div class="stat-card"><div class="stat-number">${totalDevicesDeployed}</div><div class="stat-label">Deployed Devices</div></div>
@@ -145,8 +127,7 @@ class AdvancedPOSTracker {
       agg[l.division] ||= { total:0, deployed:0, pending:0, issues:0 };
       agg[l.division].total++;
       if (l.installationStatus === "Completed") agg[l.division].deployed++; else agg[l.division].pending++;
-      const t = (l.issuesIfAny || "").toString().trim().toLowerCase();
-      if (t && t !== "none") agg[l.division].issues++;
+      if (l.issuesIfAny && l.issuesIfAny.trim() && l.issuesIfAny !== "None") agg[l.division].issues++;
     });
     let html = "";
     for (const [name, s] of Object.entries(agg)) {
@@ -199,7 +180,7 @@ class AdvancedPOSTracker {
     document.getElementById("recentActivity").innerHTML = html;
   }
 
-  // ---- Office list cards (legacy "locations") ----
+  // ---- filters / lists ----
   filterByDivision(name){ this.showTab(null,"progress"); const sel=document.getElementById("progressDivisionFilter"); if (sel){ sel.value=name; this.filterProgressByDivision(); } }
   displayLocations(){ this.renderLocationsList(this.locations, "locationsList"); }
   renderLocationsList(list, targetId="locationsList"){
@@ -241,7 +222,7 @@ class AdvancedPOSTracker {
     target.innerHTML = html;
   }
   updateFilters(){
-    const divisions=[...new Set(this.locations.map(l=>l.division))].filter(Boolean).sort();
+    const divisions=[...new Set(this.locations.map(l=>l.division))];
     const sel=document.getElementById("divisionFilter");
     if (sel){ sel.innerHTML=`<option value="">All Divisions</option>`; divisions.forEach(d=> sel.innerHTML+=`<option value="${d}">${d}</option>`); }
   }
@@ -258,10 +239,10 @@ class AdvancedPOSTracker {
     this.renderLocationsList(filtered,"locationsList");
   }
 
-  // ---- Progress ----
+  // ---- progress ----
   displayProgress(){ this.renderLocationsList(this.locations,"progressList"); }
   updateProgressFilters(){
-    const divisions=[...new Set(this.locations.map(l=>l.division))].filter(Boolean).sort();
+    const divisions=[...new Set(this.locations.map(l=>l.division))];
     const sel=document.getElementById("progressDivisionFilter");
     if (sel){ sel.innerHTML=`<option value="">All Divisions</option>`; divisions.forEach(d=> sel.innerHTML+=`<option value="${d}">${d}</option>`); }
   }
@@ -283,206 +264,7 @@ class AdvancedPOSTracker {
     this.renderLocationsList(filtered,"progressList");
   }
 
-  // ---- Office-wise details (table with inline filters & attachments) ----
-  buildOfficeColumns(){
-    return [
-      { key:'slNo', label:'Sl.No.', align:'center' },
-      { key:'division', label:'Division', align:'left' },
-      { key:'postOfficeName', label:'POST OFFICE NAME', align:'left' },
-      { key:'postOfficeId', label:'Post Office ID', align:'center' },
-      { key:'officeType', label:'Office Type', align:'center' },
-      { key:'contactPersonName', label:'Contact Person', align:'left' },
-      { key:'contactPersonNo', label:'Contact No', align:'center' },
-      { key:'altContactNo', label:'Alt Contact No', align:'center' },
-      { key:'contactEmail', label:'Contact Email', align:'left' },
-      { key:'locationAddress', label:'Location Address', align:'left' },
-      { key:'location', label:'Location', align:'left' },
-      { key:'city', label:'CITY', align:'left' },
-      { key:'state', label:'STATE', align:'left' },
-      { key:'pincode', label:'PINCODE', align:'center' },
-      { key:'numberOfPosToBeDeployed', label:'POS Required', align:'center' },
-      { key:'typeOfPosTerminal', label:'Type of POS', align:'center' },
-      { key:'dateOfReceiptOfDevice', label:'Date of Receipt', align:'center' },
-      { key:'noOfDevicesReceived', label:'Devices Received', align:'center' },
-      { key:'serialNo', label:'Serial No', align:'center' },
-      { key:'mid', label:'MID', align:'center' },
-      { key:'tid', label:'TID', align:'center' },
-      { key:'installationStatus', label:'Installation Status', align:'center', filter:'select' },
-      { key:'functionalityStatus', label:'Functionality Status', align:'center', filter:'select' },
-      { key:'issuesIfAny', label:'Issues (if any)', align:'left' },
-      { key:'attachments', label:'Documents', align:'center', isAttachment:true },
-    ];
-  }
-  renderOfficeDetails(){
-    const head = document.getElementById("officeDetailsHead");
-    const filterRow = document.getElementById("officeDetailsFilterRow");
-    const body = document.getElementById("officeDetailsBody");
-    if (!head || !filterRow || !body) return;
-
-    const cols = this.buildOfficeColumns();
-
-    // Header
-    head.innerHTML = cols.map(c => `<th class="${c.align==='left'?'left':''}">${c.label}</th>`).join("");
-
-    // Inline filters
-    const uniq = a => Array.from(new Set(a.filter(Boolean)));
-    const statuses = uniq(this.locations.map(x=>x.installationStatus)).sort();
-    const funcs = uniq(this.locations.map(x=>x.functionalityStatus)).sort();
-
-    filterRow.innerHTML = cols.map(c=>{
-      if (c.key==='slNo' || c.isAttachment) return `<th></th>`;
-      if (c.filter==='select'){
-        const opts = (c.key==='installationStatus'?statuses:funcs)
-          .map(v=>`<option value="${v}">${v}</option>`).join("");
-        return `<th><select data-key="${c.key}"><option value="">All</option>${opts}</select></th>`;
-      }
-      return `<th><input type="text" placeholder="Filter…" data-key="${c.key}"></th>`;
-    }).join("");
-
-    filterRow.querySelectorAll("input,select").forEach(el=>{
-      el.addEventListener("input", ()=> this.filterOfficeDetails());
-      el.addEventListener("change", ()=> this.filterOfficeDetails());
-    });
-
-    this._paintOfficeRows(cols);
-    this._autoFitOfficeColumns();
-    window.addEventListener("resize", this._autoFitOfficeColumns.bind(this));
-  }
-  filterOfficeDetails(){
-    const cols = this.buildOfficeColumns();
-    this._paintOfficeRows(cols);
-    this._autoFitOfficeColumns();
-  }
-  _paintOfficeRows(cols){
-    const body = document.getElementById("officeDetailsBody");
-    if (!body) return;
-
-    // Active filters
-    const filters = {};
-    document.querySelectorAll("#officeDetailsFilterRow [data-key]").forEach(el=>{
-      const k = el.getAttribute("data-key");
-      const v = (el.value || "").trim().toLowerCase();
-      if (v) filters[k] = v;
-    });
-
-    // Filter + keep "RMS HB Division" last
-    const rows = (this.locations||[]).filter(l=>{
-      for (const [k,v] of Object.entries(filters)){
-        const raw = (l[k] ?? "").toString().toLowerCase();
-        if (!raw.includes(v)) return false;
-      }
-      return true;
-    }).sort((a,b)=>{
-      const ad=a.division||"", bd=b.division||"";
-      if (ad==="RMS HB Division" && bd!=="RMS HB Division") return 1;
-      if (bd==="RMS HB Division" && ad!=="RMS HB Division") return -1;
-      const d = ad.localeCompare(bd);
-      return d!==0 ? d : (a.postOfficeName||"").localeCompare(b.postOfficeName||"");
-    });
-
-    if (!rows.length){
-      body.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center;padding:14px;">No matching records</td></tr>`;
-      return;
-    }
-
-    const isAdmin = this.isAdmin();
-
-    body.innerHTML = rows.map((l, i)=>{
-      const tds = cols.map(c=>{
-        if (c.isAttachment){
-          const cnt = (l.attachments?.length || 0);
-          const viewBtn = `<button class="btn btn-sm btn-info" onclick="tracker.showDocs(${l.id})">View ${cnt?`(${cnt})`:''}</button>`;
-          const upBtn = isAdmin ? `<button class="btn btn-sm btn-secondary" onclick="tracker.triggerDocsUpload(${l.id})">Upload</button>` : "";
-          return `<td>${viewBtn}${isAdmin?` ${upBtn}`:""}</td>`;
-        }
-        const raw = (c.key==='slNo') ? (i+1) : (l[c.key] ?? "");
-        const val = (raw===null || raw===undefined) ? "" : raw;
-        const blank = (String(val).trim()==="");
-        const cls = `${c.align==='left'?'left':''} ${blank?'cell-blank':''}`;
-        return `<td class="${cls}">${val}</td>`;
-      }).join("");
-      return `<tr>${tds}</tr>`;
-    }).join("");
-  }
-  // Auto-fit widths by measuring header & cell text
-  _autoFitOfficeColumns(){
-    const table = document.getElementById("officeDetailsTable");
-    if (!table) return;
-    const ths = Array.from(table.querySelectorAll("thead tr:first-child th"));
-    const rows = Array.from(table.tBodies[0]?.rows || []);
-    const ctx = document.createElement("canvas").getContext("2d");
-    ctx.font = "14px 'Segoe UI', Tahoma, sans-serif";
-
-    ths.forEach((th, idx) => {
-      let max = ctx.measureText((th.textContent || "").trim()).width;
-      rows.forEach(tr => {
-        const cell = tr.cells[idx];
-        if (!cell) return;
-        const text = (cell.textContent || "").trim();
-        max = Math.max(max, ctx.measureText(text).width);
-      });
-      const padding = 28; // left + right
-      const px = Math.ceil(max) + padding;
-      [th, ...rows.map(r=>r.cells[idx])].forEach(el=>{
-        if (el){ el.style.minWidth = px + "px"; el.style.width = px + "px"; }
-      });
-    });
-  }
-  isAdmin(){ return this.adminUsers.includes(this.currentUser); }
-  triggerDocsUpload(id){
-    const inp = document.createElement("input");
-    inp.type = "file"; inp.accept = "application/pdf"; inp.multiple = true;
-    inp.onchange = (e)=> this.handleDocsUpload(id, e.target.files);
-    inp.click();
-  }
-  handleDocsUpload(id, files){
-    const loc = this.locations.find(x=>x.id===id); if (!loc) return;
-    loc.attachments ||= [];
-    const readers = Array.from(files || []).slice(0,10).map(f => new Promise(res=>{
-      const r = new FileReader();
-      r.onload = ()=> res({ name:f.name, dataUrl:r.result, uploadedAt:new Date().toISOString() });
-      r.readAsDataURL(f);
-    }));
-    Promise.all(readers).then(list=>{
-      loc.attachments.push(...list);
-      this.saveToStorage();
-      this.renderOfficeDetails(); // refresh
-    });
-  }
-  showDocs(id){
-    const loc = this.locations.find(x=>x.id===id); if (!loc) return;
-    const items = (loc.attachments||[]);
-    let html = `<div class="modal" id="docsModal" style="display:block"><div class="modal-content">
-      <span class="close" onclick="document.getElementById('docsModal').remove()">×</span>
-      <h3 style="margin-bottom:10px">Documents for: ${loc.postOfficeName || ''}</h3>`;
-    if (!items.length){
-      html += `<p>No documents uploaded yet.</p>`;
-    } else {
-      html += `<ul style="list-style:none;padding-left:0;display:grid;gap:10px">`;
-      items.forEach((a,i)=>{
-        html += `<li style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-          <span>📄 ${a.name}</span>
-          <span>
-            <a class="btn btn-sm btn-info" href="${a.dataUrl}" target="_blank" rel="noopener">View</a>
-            ${ this.isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="tracker.removeDoc(${id},${i})">Remove</button>` : "" }
-          </span>
-        </li>`;
-      });
-      html += `</ul>`;
-    }
-    html += `</div></div>`;
-    document.body.insertAdjacentHTML("beforeend", html);
-  }
-  removeDoc(id, idx){
-    const loc = this.locations.find(x=>x.id===id); if (!loc) return;
-    if (!confirm("Remove this document?")) return;
-    (loc.attachments||[]).splice(idx,1);
-    this.saveToStorage();
-    document.getElementById('docsModal')?.remove();
-    this.renderOfficeDetails();
-  }
-
-  // ---- reports (onscreen) ----
+  // ---- reports ----
   generateReports(){
     const host = document.getElementById("reportsContent");
     if (!host) return;
@@ -493,7 +275,7 @@ class AdvancedPOSTracker {
       return;
     }
 
-    // Region Summary
+    // ---------- Region Summary ----------
     const totalOffices = rows.length;
     const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
     const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
@@ -510,18 +292,19 @@ class AdvancedPOSTracker {
       </div>
     `;
 
-    // Division-wise Detailed Report
+    // ---------- Division-wise Detailed Report ----------
     const byDiv = {};
     rows.forEach(r => {
       const d = r.division || "—";
       (byDiv[d] ||= []).push(r);
     });
+
     const hasIssue = (v)=>{
-      const s = (v ?? "").toString().trim().toLowerCase();
-      return s && s !== "none";
+      const s = (v ?? "").toString().trim();
+      return s && s.toLowerCase() !== "none";
     };
 
-    // Sort alpha; "RMS HB Division" last
+    // custom sort: alphabetical, but "RMS HB Division" always last
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
@@ -529,14 +312,18 @@ class AdvancedPOSTracker {
     });
 
     const tdC = ' style="text-align:center"';
+
     const tableRows = entries.map(([division, arr]) => {
       const offices = arr.length;
       const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
       const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
       const pending = Math.max(0, devicesRequired - devicesReceived);
+
       const devicesInstalled = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
       const pendingInstall = Math.max(0, devicesReceived - devicesInstalled);
+
       const issues = arr.filter(x => hasIssue(x.issuesIfAny)).length;
+
       const completed = devicesInstalled;
       const completionPct = devicesRequired ? Math.round((devicesInstalled / devicesRequired) * 100) : 0;
 
@@ -604,7 +391,7 @@ class AdvancedPOSTracker {
       </table>
     `;
 
-    // ⚠️ Locations with Issues
+    // ---------- ⚠️ Locations with Issues ----------
     const issuesList = rows.filter(r => hasIssue(r.issuesIfAny));
     let issuesHTML = "";
     if (issuesList.length){
@@ -648,12 +435,14 @@ class AdvancedPOSTracker {
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // Professional Reports PDF (orientation chooser, DD/MM/YYYY, centered cells, uniform header fill, auto-fit widths)
+  // Professional reports PDF with orientation chooser, DD/MM/YYYY dates, uniform light header fill,
+  // vertically centered cells, "Devices received today" in Region Summary,
+  // and AUTO-FIT column widths based on header + content.
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
 
-    // Orientation chooser
+    // Orientation chooser (radio buttons)
     if (!opts || !opts.orientation){
       const id = "pdf-orient-overlay";
       if (document.getElementById(id)) return; // already open
@@ -688,7 +477,7 @@ class AdvancedPOSTracker {
       return;
     }
 
-    // Helpers
+    // Setup / helpers
     const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
     const formatDMY = (d)=> {
       const dd = String(d.getDate()).padStart(2,"0");
@@ -721,19 +510,21 @@ class AdvancedPOSTracker {
       return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
     }, 0);
 
-    // Group by division (RMS HB Division last)
+    // Group by division
     const byDiv = {};
     rows.forEach(r=>{
       const d = r.division || "—";
       (byDiv[d] ||= []).push(r);
     });
+
+    // Division entries: alphabetical except "RMS HB Division" last
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
       return a.localeCompare(b);
     });
 
-    // Division table rows
+    // Rows for table
     const divisions = entries.map(([division, arr])=>{
       const offices = arr.length;
       const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
@@ -766,28 +557,27 @@ class AdvancedPOSTracker {
       pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
     };
 
-    // PDF doc setup
-    const { jsPDF } = window.jspdf;
+    // PDF doc
     const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
     const margin = 32;
     let y = margin;
 
-    // Styles
-    const headerFill = { r: 246, g: 248, b: 252 };  // light header
-    const stripeFill = { r: 252, g: 253, b: 255 };  // zebra
+    // Colors / fonts
+    const headerFill = { r: 246, g: 248, b: 252 };  // light, professional
+    const stripeFill = { r: 252, g: 253, b: 255 };  // subtle zebra
     const borderGray = 180;
     const brandBlue = { r: 52, g: 152, b: 219 };
 
     const fontTitle = 15;
     const fontSub   = 11;
-    const fontHead  = 9.5;
+    const fontHead  = 9.5;   // compact for single-page fit
     const fontBody  = 9;
     const lineH     = 11;
     const padX      = 6;
 
-    // Columns (labels + alignment)
+    // Table columns (labels + alignment)
     const tableCols = [
       { key:'division', label:'Division', align:'left'  },
       { key:'offices',  label:'Offices', align:'center'},
@@ -803,13 +593,16 @@ class AdvancedPOSTracker {
     const tableX = margin;
     const tableW = pageW - margin*2;
 
-    // Auto-fit widths
+    // --- Auto-fit column widths (measure header + content) ---
     function computeAutoWidths(){
+      // min widths (pt)
       const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
 
+      // measure header width at header font
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
 
+      // measure content width at body font (consider divisions, numbers, totals row)
       doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
       const contentW = tableCols.map(() => 0);
 
@@ -823,15 +616,19 @@ class AdvancedPOSTracker {
       divisions.forEach(consider);
       consider(totalsRow);
 
+      // desired width = max(header, content, min)
       let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
       let sumDesired = desired.reduce((a,b)=>a+b,0);
 
+      // scale down if over
       if (sumDesired > tableW){
         const scale = tableW / sumDesired;
         desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
         let sum = desired.reduce((a,b)=>a+b,0);
+        // if still over (due to min constraints), shave from widest slack columns
         let tries = 0;
         while (sum > tableW && tries < 200){
+          // find column with most slack over min
           let idx = -1, slackMax = -1;
           for (let i=0;i<desired.length;i++){
             const slack = desired[i] - minW[i];
@@ -843,6 +640,7 @@ class AdvancedPOSTracker {
           tries++;
         }
       } else if (sumDesired < tableW){
+        // distribute leftover (bias to Division and longer-text columns)
         let leftover = tableW - sumDesired;
         const priorityKeys = ['division','pinst','req','rec','inst'];
         while (leftover > 0){
@@ -857,9 +655,12 @@ class AdvancedPOSTracker {
           }
         }
       }
+
+      // assign to columns
       tableCols.forEach((c,i)=> c.w = desired[i]);
     }
 
+    // helpers
     function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
     function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
     function newPage(){ doc.addPage(); y = margin; drawHeader(); }
@@ -868,6 +669,7 @@ class AdvancedPOSTracker {
       return rowTop + (rowH - contentH)/2 + lineH*0.85;
     }
 
+    // Header
     function drawHeader(){
       doc.setFont('helvetica','bold'); doc.setFontSize(fontTitle);
       doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
@@ -882,7 +684,7 @@ class AdvancedPOSTracker {
     }
     drawHeader();
 
-    // Region Summary
+    // Region Summary (two columns) — uses "Devices received today"
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Region Summary', margin, y); y += 12;
 
@@ -895,8 +697,8 @@ class AdvancedPOSTracker {
       ['Total Devices received', String(totalDevicesReceived)],
       ['Devices received today', String(devicesReceivedToday)]
     ];
-    const colGap = 260;
-    const valOffset = 190;
+    const colGap = 260; // right column group start
+    const valOffset = 190; // value alignment width
 
     rsLeft.forEach(([k,v],i)=>{
       ensureSpace(14);
@@ -911,27 +713,27 @@ class AdvancedPOSTracker {
     });
     y += 6;
 
-    // Auto-fit widths and draw table
+    // compute auto widths now that we know rows
     computeAutoWidths();
 
+    // Table header (uniform background across the whole header row)
     function drawTableHeader(){
       ensureSpace(24);
       setBorder();
+      // compute header height from wrapped labels
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-
-      // header height from wrapped labels
       const headerHeights = tableCols.map(c => {
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
         return Math.max(18, lines.length * lineH + 6);
       });
       const headerH = Math.max(...headerHeights);
 
-      // full-width light background
+      // Single full-width background
       doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
       doc.rect(tableX, y, totalW, headerH, 'F');
 
-      // per-cell borders + text
+      // Per-cell borders + text
       let x = tableX;
       tableCols.forEach(c=>{
         doc.rect(x, y, c.w, headerH, 'S');
@@ -944,9 +746,11 @@ class AdvancedPOSTracker {
         }
         x += c.w;
       });
+
       y += headerH;
     }
 
+    // Table row
     function drawRow(obj, stripe=false, bold=false){
       doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
       const cells = tableCols.map(col=>{
@@ -978,6 +782,7 @@ class AdvancedPOSTracker {
       y += rowH;
     }
 
+    // Render table
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Division-wise Detailed Report', margin, y); y += 8;
     drawTableHeader();
@@ -986,10 +791,11 @@ class AdvancedPOSTracker {
       if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
       drawRow(r, idx % 2 === 1);
     });
+    // Totals row
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
     drawRow(totalsRow, false, true);
 
-    // Footer: page numbers + date
+    // Footer: page numbers + date on every page
     const pages = doc.getNumberOfPages();
     for (let i=1; i<=pages; i++){
       doc.setPage(i);
@@ -1006,66 +812,27 @@ class AdvancedPOSTracker {
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf; const doc=new jsPDF();
     doc.setFontSize(20); doc.text(title,20,30);
-    doc.setFontSize(12); doc.text(`Generated on: ${new Date().toLocaleDateString("en-GB")}`,20,45);
+    doc.setFontSize(12); doc.text(`Generated on: ${new Date().toLocaleDateString()}`,20,45);
     doc.text(`Generated by: ${this.currentUser||"User"}`,20,55);
     doc.save(`${title.replace(/\s+/g,'-')}-${new Date().toISOString().slice(0,10)}.pdf`);
   }
 
-  printReports(){ window.print(); }
-
   // ---- CRUD ----
-  showLocationForm(){
-    this.currentLocationId=null;
-    document.getElementById("modalTitle").textContent="Add New Location";
-    document.getElementById("locationForm").reset();
-    document.getElementById("locationModal").style.display="block";
-  }
+  showLocationForm(){ this.currentLocationId=null; document.getElementById("modalTitle").textContent="Add New Location"; document.getElementById("locationForm").reset(); document.getElementById("locationModal").style.display="block"; }
   closeLocationModal(){ document.getElementById("locationModal").style.display="none"; }
-
   saveLocation(event){
     event.preventDefault();
-    const d=id=>document.getElementById(id)?.value || "";
-
-    // Duplicate Serial No check
-    const enteredSerial = (d("serialNo") || "").trim();
-    if (enteredSerial){
-      const dup = this.locations.some(l =>
-        (l.serialNo || "").trim().toLowerCase() === enteredSerial.toLowerCase() &&
-        (!this.currentLocationId || l.id !== this.currentLocationId)
-      );
-      if (dup){
-        alert("Duplicate Serial No detected. Please enter a unique Serial No.");
-        const el = document.getElementById("serialNo");
-        if (el) { el.focus(); el.style.borderColor = "#e74c3c"; setTimeout(()=> el.style.borderColor="", 2000); }
-        return;
-      }
-    }
-
+    const d=id=>document.getElementById(id).value;
     const locationData = {
-      division: d("division"),
-      postOfficeName: d("postOfficeName"),
-      postOfficeId: d("postOfficeId"),
-      officeType: d("officeType"),
-      contactPersonName: d("contactPersonName"),
-      contactPersonNo: d("contactPersonNo"),
-      city: d("city"),
-      state: d("state"),
-      pincode: d("pincode"),
-      numberOfPosToBeDeployed: parseInt(d("numberOfPosToBeDeployed"))||0,
-      dateOfReceiptOfDevice: d("dateOfReceiptOfDevice"),
-      noOfDevicesReceived: parseInt(d("noOfDevicesReceived"))||0,
-      installationStatus: d("installationStatus"),
-      functionalityStatus: d("functionalityStatus"),
-      issuesIfAny: (document.getElementById("issuesIfAny")?.value || "None"),
-      // NEW fields
-      typeOfPosTerminal: d("typeOfPosTerminal") || "EZETAP ANDROID X990",
-      serialNo: enteredSerial,
-      mid: d("mid"),
-      tid: d("tid"),
-      // preserve existing attachments on edit
-      attachments: this.currentLocationId ? (this.locations.find(x=>x.id===this.currentLocationId)?.attachments || []) : []
+      division: d("division"), postOfficeName: d("postOfficeName"), postOfficeId: d("postOfficeId"),
+      officeType: d("officeType"), contactPersonName: d("contactPersonName"),
+      contactPersonNo: d("contactPersonNo"), city: d("city"), state: d("state"),
+      pincode: d("pincode"), numberOfPosToBeDeployed: parseInt(d("numberOfPosToBeDeployed"))||0,
+      dateOfReceiptOfDevice: d("dateOfReceiptOfDevice"), noOfDevicesReceived: parseInt(d("noOfDevicesReceived"))||0,
+      installationStatus: d("installationStatus"), functionalityStatus: d("functionalityStatus"),
+      issuesIfAny: document.getElementById("issuesIfAny").value || "None",
+      altContactNo:"", contactEmail:"", locationAddress:"", location:"", typeOfPosTerminal:"EZETAP ANDROID X990", serialNo:""
     };
-
     if (this.currentLocationId){
       const i=this.locations.findIndex(l=>l.id===this.currentLocationId);
       if (i>-1) this.locations[i] = { ...this.locations[i], ...locationData };
@@ -1074,22 +841,13 @@ class AdvancedPOSTracker {
       locationData.slNo=this.locations.length+1;
       this.locations.push(locationData);
     }
-    this.saveToStorage();
-    this.closeLocationModal();
-    this.updateDashboard();
-    alert("Location saved successfully!");
+    this.saveToStorage(); this.closeLocationModal(); this.updateDashboard(); alert("Location saved successfully!");
   }
-
   editLocation(id){
     this.currentLocationId=id; const l=this.locations.find(x=>x.id===id);
     if (!l) return;
     document.getElementById("modalTitle").textContent="Edit Location";
-    [
-      "division","postOfficeName","postOfficeId","officeType","contactPersonName",
-      "contactPersonNo","city","state","pincode","numberOfPosToBeDeployed",
-      "dateOfReceiptOfDevice","noOfDevicesReceived","installationStatus","functionalityStatus",
-      "issuesIfAny","typeOfPosTerminal","serialNo","mid","tid"
-    ].forEach(k=>{
+    ["division","postOfficeName","postOfficeId","officeType","contactPersonName","contactPersonNo","city","state","pincode","numberOfPosToBeDeployed","dateOfReceiptOfDevice","noOfDevicesReceived","installationStatus","functionalityStatus","issuesIfAny"].forEach(k=>{
       const el=document.getElementById(k); if (el) el.value = l[k] ?? "";
     });
     document.getElementById("locationModal").style.display="block";
@@ -1098,58 +856,32 @@ class AdvancedPOSTracker {
     if (!confirm("Delete this Post Office?")) return;
     this.locations=this.locations.filter(l=>l.id!==id);
     this.locations.forEach((l,i)=> l.slNo=i+1);
-    this.saveToStorage(); this.displayLocations(); this.updateDashboard();
-    alert("Post Office deleted successfully!");
+    this.saveToStorage(); this.displayLocations(); this.updateDashboard(); alert("Post Office deleted successfully!");
   }
 
-  // ---- Excel import/export ---- (updated to include MID/TID)
+  // ---- Excel import/export ----
   downloadTemplate(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=[
-      'Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type',
-      'NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.',
-      'CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE',
-      'NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device',
-      'No of devices received','Serial No','MID','TID','Installation status',
-      'Functionality / Working status of POS machines','Issues if any'
-    ];
-    const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Office',
-      'Contact Person','9876543210','9876543211','contact@postoffice.gov.in','Sample Address',
-      'Sample Location','Sample City','Sample State','123456',5,'EZETAP ANDROID X990',
-      '',0,'SER123','MID123','TID123','Pending','Not Tested','None'];
-    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]);
-    XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Office','Contact Person','9876543210','9876543211','contact@postoffice.gov.in','Sample Address','Sample Location','Sample City','Sample State','123456',5,'EZETAP ANDROID X990','',0,'','Pending','Not Tested','None'];
+    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]); XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
   }
   exportCurrentData(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=[
-      'Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type',
-      'NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.',
-      'CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE',
-      'NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device',
-      'No of devices received','Serial No','MID','TID','Installation status',
-      'Functionality / Working status of POS machines','Issues if any'
-    ];
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
     const rows=this.locations.map(l=>[
       l.slNo||'',l.division||'',l.postOfficeName||'',l.postOfficeId||'',l.officeType||'',
       l.contactPersonName||'',l.contactPersonNo||'',l.altContactNo||'',l.contactEmail||'',
       l.locationAddress||'',l.location||'',l.city||'',l.state||'',l.pincode||'',
       l.numberOfPosToBeDeployed||'',l.typeOfPosTerminal||'',l.dateOfReceiptOfDevice||'',
-      l.noOfDevicesReceived||'',l.serialNo||'',l.mid||'',l.tid||'',
-      l.installationStatus||'',l.functionalityStatus||'',l.issuesIfAny||''
+      l.noOfDevicesReceived||'',l.serialNo||'',l.installationStatus||'',l.functionalityStatus||'',l.issuesIfAny||''
     ]);
-    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
-    XLSX.utils.book_append_sheet(wb,ws,"POS Data");
+    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,...rows]); XLSX.utils.book_append_sheet(wb,ws,"POS Data");
     XLSX.writeFile(wb,`POS_Data_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
   }
   exportToExcel(){ this.exportCurrentData(); }
-
   showImportModal(){ document.getElementById("importModal").style.display="block"; }
-  closeImportModal(){
-    document.getElementById("importModal").style.display="none";
-    document.getElementById("importPreview").classList.add("hidden");
-    document.getElementById("excelFileInput").value="";
-  }
+  closeImportModal(){ document.getElementById("importModal").style.display="none"; document.getElementById("importPreview").classList.add("hidden"); document.getElementById("excelFileInput").value=""; }
   handleExcelImport(event){
     const file=event.target.files?.[0]; if (!file) return;
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
@@ -1180,9 +912,7 @@ class AdvancedPOSTracker {
         locationAddress:r[9]||'', location:r[10]||'', city:r[11]||'', state:r[12]||'',
         pincode:r[13]||'', numberOfPosToBeDeployed:parseInt(r[14])||1, typeOfPosTerminal:r[15]||'EZETAP ANDROID X990',
         dateOfReceiptOfDevice:r[16]||'', noOfDevicesReceived:parseInt(r[17])||0, serialNo:r[18]||'',
-        mid:r[19]||'', tid:r[20]||'',
-        installationStatus:r[21]||'Pending', functionalityStatus:r[22]||'Not Tested', issuesIfAny:r[23]||'None',
-        attachments:[]
+        installationStatus:r[19]||'Pending', functionalityStatus:r[20]||'Not Tested', issuesIfAny:r[21]||'None'
       });
     }
     this.importData=out;
@@ -1193,7 +923,7 @@ class AdvancedPOSTracker {
     let html=`<div class="alert alert-success"><strong>✅ Ready to import ${this.importData.length} locations</strong></div>
       <div style="max-height:300px;overflow-y:auto;">
       <table class="data-table"><thead><tr><th>Post Office</th><th>Division</th><th>City</th><th>Status</th></tr></thead><tbody>`;
-    this.importData.slice(0,10).forEach(l=>{ html+=`<tr><td>${l.postOfficeName}</td><td>${l.division}</td><td>${l.city||''}</td><td>${l.installationStatus}</td></tr>`; });
+    this.importData.slice(0,10).forEach(l=>{ html+=`<tr><td>${l.postOfficeName}</td><td>${l.division}</td><td>${l.city}</td><td>${l.installationStatus}</td></tr>`; });
     html+=`</tbody></table></div>`; if (this.importData.length>10) html+=`<p><em>Showing first 10 of ${this.importData.length} locations</em></p>`;
     el.innerHTML=html; document.getElementById("importPreview").classList.remove("hidden");
   }
@@ -1231,52 +961,6 @@ class AdvancedPOSTracker {
     this.locations=[]; this.nextLocationId=1; this.saveToStorage(); this.updateDashboard(); this.displayLocations();
     alert("All data cleared.");
   }
-
-  // ---- optional: simple stats filler to avoid null calls ----
-  updateDataStatistics(){
-    const el = document.getElementById("dataStatistics");
-    if (!el) return;
-    const total = this.locations.length;
-    const completed = this.locations.filter(l=> (l.installationStatus||"").trim()==="Completed").length;
-    el.innerHTML = `<p>Total offices: <strong>${total}</strong> &middot; Completed installations: <strong>${completed}</strong></p>`;
-  }
 }
 
 window.tracker = new AdvancedPOSTracker();
-
-// Init if not already handled elsewhere
-window.addEventListener('DOMContentLoaded', () => {
-  if (window.tracker && !window.tracker._inited) {
-    window.tracker.init().catch(()=>{});
-  }
-});
-
-/* Graceful wrappers (only if bridge.js didn't define them) */
-(function(){
-  const m = (name, fn) => { if (!window[name]) window[name] = fn; };
-  m('showTab', (e, id)=> tracker.showTab(e, id));
-  m('showLocationForm', ()=> tracker.showLocationForm());
-  m('closeLocationModal', ()=> tracker.closeLocationModal());
-  m('saveLocation', (ev)=> tracker.saveLocation(ev));
-  m('editLocation', (id)=> tracker.editLocation(id));
-  m('deleteLocation', (id)=> tracker.deleteLocation(id));
-  m('filterLocations', ()=> tracker.filterLocations());
-  m('filterProgress', ()=> tracker.filterProgress());
-  m('filterProgressByDivision', ()=> tracker.filterProgressByDivision());
-  m('downloadTemplate', ()=> tracker.downloadTemplate());
-  m('exportCurrentData', ()=> tracker.exportCurrentData());
-  m('exportToExcel', ()=> tracker.exportToExcel());
-  m('showImportModal', ()=> tracker.showImportModal());
-  m('closeImportModal', ()=> tracker.closeImportModal());
-  m('handleExcelImport', (e)=> tracker.handleExcelImport(e));
-  m('confirmImport', ()=> tracker.confirmImport());
-  m('cancelImport', ()=> tracker.cancelImport());
-  m('createBackup', ()=> tracker.createBackup());
-  m('restoreBackup', ()=> tracker.restoreBackup());
-  m('handleBackupRestore', (e)=> tracker.handleBackupRestore(e));
-  m('clearAllData', ()=> tracker.clearAllData());
-  m('printReports', ()=> tracker.printReports());
-  m('exportDashboardPDF', ()=> tracker.exportDashboardPDF());
-  m('exportProgressPDF', ()=> tracker.exportProgressPDF());
-  m('exportReportsPDF', ()=> tracker.exportReportsPDF());
-})();

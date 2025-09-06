@@ -4,15 +4,21 @@
   --info-color:#2980b9; --light-color:#ecf0f1; --dark-color:#2c3e50;
   --bg-gradient:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
 
-  /* fixed-header defaults (JS can overwrite these with actual heights) */
+  /* fixed-header defaults (JS overwrites with actual heights) */
   --header-h:72px;
   --nav-h:56px;
 }
+
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%);color:var(--dark-color);line-height:1.6}
+body{
+  font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;
+  background:linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%);
+  color:var(--dark-color); line-height:1.6;
+}
 .app-container{min-height:100vh;display:flex;flex-direction:column}
 .hidden{display:none!important}
 
+/* --- Login (frozen) --- */
 .login-container{display:flex;justify-content:center;align-items:center;min-height:100vh;background:var(--bg-gradient)}
 .login-card{background:#fff;padding:40px;border-radius:15px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;min-width:320px}
 .login-title{font-size:2rem;font-weight:700;color:var(--primary-color);margin-bottom:30px}
@@ -20,6 +26,7 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 .user-btn{padding:15px 20px;background:var(--accent-color);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;transition:all .3s ease;font-size:14px}
 .user-btn:hover{background:var(--primary-color);transform:translateY(-2px)}
 
+/* --- Header/Nav (fixed; frozen) --- */
 .app-header{
   background:var(--bg-gradient);color:#fff;padding:1rem 0;box-shadow:0 2px 10px rgba(0,0,0,.1);
   position:fixed; top:0; left:0; right:0; z-index:900; /* below .modal (1000) */
@@ -39,14 +46,15 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 .nav-tab:hover{background:var(--light-color);color:var(--primary-color)}
 .nav-tab.active{color:var(--accent-color);border-bottom-color:var(--accent-color)}
 
+/* --- Main --- */
 .app-main{
   flex:1;max-width:1400px;margin:0 auto;width:100%;
-  /* push content below the fixed header + nav */
-  padding:calc(30px + var(--header-h) + var(--nav-h)) 20px 30px;
+  padding:calc(30px + var(--header-h) + var(--nav-h)) 20px 30px; /* push below fixed bars */
 }
 .tab-content{display:none}
 .tab-content.active{display:block}
 
+/* --- Buttons (frozen) --- */
 .btn{padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .3s ease;font-size:14px}
 .btn:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
 .btn-primary{background:var(--accent-color);color:#fff}
@@ -58,6 +66,7 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 .btn-lg{padding:15px 30px;font-size:16px}
 .btn-sm{padding:8px 16px;font-size:12px}
 
+/* --- Cards/Stats (frozen) --- */
 .card{background:#fff;border-radius:12px;padding:25px;box-shadow:0 4px 20px rgba(0,0,0,.08);transition:all .3s ease}
 .card:hover{transform:translateY(-5px);box-shadow:0 8px 30px rgba(0,0,0,.12)}
 
@@ -67,6 +76,7 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 .stat-number{font-size:3rem;font-weight:800;color:var(--accent-color);margin:10px 0}
 .stat-label{color:var(--secondary-color);font-weight:600;text-transform:uppercase;font-size:.9rem;letter-spacing:1px}
 
+/* --- Division tiles (frozen) --- */
 .division-stats{display:grid;grid-template-columns:repeat(auto-fit, minmax(300px,1fr));gap:20px;margin-bottom:30px}
 .division-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,.08);border-left:5px solid var(--success-color)}
 .division-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}
@@ -76,31 +86,38 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 .division-stat-number{font-size:1.5rem;font-weight:700;color:var(--accent-color)}
 .division-stat-label{font-size:.8rem;color:var(--secondary-color);font-weight:600}
 
+/* --- Modal (frozen) --- */
 .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.7);z-index:1000;overflow-y:auto}
 .modal-content{background:#fff;margin:50px auto;padding:40px;width:90%;max-width:800px;border-radius:15px;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative}
 .close{position:absolute;top:15px;right:20px;font-size:28px;cursor:pointer;color:var(--secondary-color)}
 .close:hover{color:var(--danger-color)}
 
+/* --- Forms (frozen) --- */
 .form-group{margin-bottom:20px}
 .form-group label{display:block;margin-bottom:8px;font-weight:600;color:var(--primary-color)}
 .form-group input,.form-group select,.form-group textarea{width:100%;padding:12px;border:2px solid #e1e5e9;border-radius:6px;font-size:14px;transition:border-color .3s ease;box-sizing:border-box}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--accent-color)}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:15px;margin-bottom:20px}
 
+/* --- Progress bar (frozen) --- */
 .progress-bar{width:100%;height:20px;background:#e1e5e9;border-radius:10px;overflow:hidden;margin:10px 0}
 .progress-fill{height:100%;background:var(--success-color);transition:width .5s ease}
 
+/* --- Alerts (frozen) --- */
 .alert{padding:15px;border-radius:8px;margin-bottom:20px}
 .alert-info{background:#d1ecf1;color:#0c5460;border:1px solid #bee5eb}
 .alert-success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}
 
+/* --- Generic tables (frozen) --- */
 .data-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.08)}
 .data-table th,.data-table td{padding:15px;text-align:left;border-bottom:1px solid #e1e5e9}
 .data-table th{background:var(--primary-color);color:#fff;font-weight:700;text-transform:uppercase;font-size:.8rem}
 
+/* --- Section header (frozen) --- */
 .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px;padding-bottom:15px;border-bottom:2px solid var(--light-color)}
 .section-title{font-size:1.8rem;font-weight:700;color:var(--primary-color)}
 
+/* --- Location Cards (frozen) --- */
 .location-card{background:#fff;border-radius:12px;padding:25px;margin-bottom:20px;box-shadow:0 4px 20px rgba(0,0,0,.08);border-left:5px solid var(--success-color)}
 .location-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:15px}
 .location-title{font-size:1.4rem;font-weight:700;color:var(--primary-color)}
@@ -113,10 +130,12 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 .detail-label{font-size:.8rem;font-weight:700;color:var(--secondary-color);margin-bottom:5px;text-transform:uppercase}
 .detail-value{font-weight:600;color:var(--primary-color)}
 
+/* --- Filters toolbar (frozen) --- */
 .filters{display:flex;gap:15px;margin-bottom:25px;flex-wrap:wrap;align-items:center}
 .filter-input{flex:1;min-width:250px;padding:12px;border:2px solid #e1e5e9;border-radius:6px;font-size:14px}
 .filter-select{padding:12px;border:2px solid #e1e5e9;border-radius:6px;font-size:14px;min-width:150px}
 
+/* --- Responsive (frozen) --- */
 @media (max-width:768px){
   .header-content{flex-direction:column;text-align:center;gap:15px}
   .nav-tabs{justify-content:center}
@@ -127,36 +146,68 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
   .user-buttons{grid-template-columns:1fr}
 }
 
-/* Office-wise: auto-fit columns + keep header words intact */
-#officeDetailsTable { table-layout: auto; }
-#officeDetailsTable thead th {
-  white-space: nowrap;
-  word-break: keep-all;
-}
-#officeDetailsTable td { vertical-align: middle; text-align: center; }
-#officeDetailsTable td.left, #officeDetailsTable th.left { text-align: left; }
+/* =========================================================
+   Office wise details (SCOPED ONLY) — auto-fit + filters
+   ========================================================= */
 
-/* Inline filters row (just below header) */
-.data-table thead .col-filter th {
-  background:#fff; padding:8px; border-bottom:1px solid #e1e5e9;
-}
-.data-table thead .col-filter input,
-.data-table thead .col-filter select {
-  width:100%; padding:6px 8px; border:1px solid #d8dee5;
-  border-radius:6px; font-size:12px; background:#fff;
-}
+/* Legacy fallback (if an older id is used anywhere) */
+#officeDetailsTable { table-layout:auto; }
+#officeDetailsTable thead th { white-space:nowrap; word-break:keep-all; }
+#officeDetailsTable td { vertical-align:middle; text-align:center; }
+#officeDetailsTable td.left, #officeDetailsTable th.left { text-align:left; }
 
-/* Blank cells highlighted (light red) */
-td.cell-blank { background:#fdecea !important; }
-
-/* --- Office wise details (scoped) --- */
+/* Wrapper that allows horizontal scroll for wide tables */
 .table-scroll{ overflow:auto; }
-.owd-table{ table-layout:auto; width:max-content; border-collapse:separate; border-spacing:0; }
-.owd-table th{ position:sticky; top:0; z-index:1; white-space:nowrap; background:#f6f8fc; }
-.owd-table thead tr.filters th{ position:sticky; top:42px; background:#f8fafc; }
-.owd-filter{ width:100%; padding:6px 8px; font-size:13px; border:1px solid #e1e5e9; border-radius:4px; }
-.cell-empty{ background:#fdecec; }      /* light red for blanks */
-.cell-dup{ background:#fff3cd; }        /* light amber for duplicate Serial No */
-.doc-actions{ display:flex; gap:8px; justify-content:center; }
 
+/* Main table used by the new renderer */
+.owd-table{
+  table-layout:auto;               /* natural auto-fit to content */
+  width:max-content;               /* shrink-to-fit; enables horizontal scroll in parent */
+  border-collapse:separate; border-spacing:0;
+  background:#fff;
+  box-shadow:0 4px 20px rgba(0,0,0,.08);
+}
 
+/* Header row: keep words intact (no breaks), sticky at top */
+.owd-table th{
+  position:sticky; top:0; z-index:1;
+  white-space:nowrap; word-break:keep-all;
+  background:#f6f8fc; color:#2c3e50;
+  font-weight:700; font-size:.85rem;
+  border-bottom:1px solid #e1e5e9;
+  padding:12px 14px;
+}
+
+/* Filters row: sticky just under header; inline inputs */
+.owd-table thead tr.filters th{
+  position:sticky; top:42px; z-index:1;
+  background:#f8fafc;
+  padding:8px 10px; border-bottom:1px solid #e1e5e9;
+}
+.owd-filter{
+  width:100%; padding:6px 8px; font-size:13px;
+  border:1px solid #d8dee5; border-radius:4px; background:#fff;
+}
+
+/* Body cells: center by default, left where needed via .left */
+.owd-table td{
+  padding:12px 14px; text-align:center; vertical-align:middle;
+  border-bottom:1px solid #eef2f6;
+}
+.owd-table td.left, .owd-table th.left{ text-align:left; }
+
+/* Blank & duplicate highlights */
+.cell-empty{ background:#fdecec; }     /* light red for blanks */
+.cell-dup{ background:#fff3cd; }       /* amber for duplicate Serial No */
+/* Back-compat alias if anything still uses cell-blank */
+td.cell-blank{ background:#fdecec !important; }
+
+/* Documents cell (upload + view links) */
+.doc-actions{ display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap; }
+.doc-actions a{ font-weight:600; color:var(--info-color); text-decoration:none; }
+.doc-actions a:hover{ text-decoration:underline; }
+
+/* Print safety: disable sticky in print to avoid overlap */
+@media print{
+  .owd-table th, .owd-table thead tr.filters th{ position:static; }
+}

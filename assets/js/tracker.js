@@ -686,6 +686,8 @@ class AdvancedPOSTracker {
       <option value="none">Rows without blanks</option>
     `;
     sBlank.value = this.topFilters.blanks;
+
+    
   }
 
   _setupHorizontalSync(table){
@@ -1226,8 +1228,8 @@ class AdvancedPOSTracker {
     for (let i=1; i<=pages; i++){
       doc.setPage(i);
       doc.setFont('helvetica','normal'); doc.setFontSize(9);
-      doc.text(`Generated on ${reportDateStr}`, pageW - margin, pageH - 12, { align:'right' });
-      doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'left' });
+      doc.text(`Generated on ${reportDateStr}`, pageW - margin, pageH - 12, { align:'left' });
+      doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'right' });
     }
 
     const stamp = new Date().toISOString().slice(0,10);

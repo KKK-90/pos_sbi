@@ -266,7 +266,7 @@ class AdvancedPOSTracker {
     this.renderLocationsList(filtered,"progressList");
   }
 
-  // ---- reports (frozen) ----
+  // ---- reports (frozen UI) ----
   generateReports(){
     const host = document.getElementById("reportsContent");
     if (!host) return;
@@ -332,6 +332,10 @@ class AdvancedPOSTracker {
       `;
     }).join("");
 
+    const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
+    const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
+    const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+
     const totalPending = Math.max(0, totalDevicesRequired - totalDevicesReceived);
     const totalPendingInstall = Math.max(0, totalDevicesReceived - devicesInstalledRegion);
     const totalIssues = rows.filter(x => hasIssue(x.issuesIfAny)).length;
@@ -341,7 +345,7 @@ class AdvancedPOSTracker {
     const totalRow = `
       <tr class="total-row">
         <td><strong>Total</strong></td>
-        <td${tdC}><strong>${totalOffices}</strong></td>
+        <td${tdC}><strong>${rows.length}</strong></td>
         <td${tdC}><strong>${totalDevicesRequired}</strong></td>
         <td${tdC}><strong>${totalDevicesReceived}</strong></td>
         <td${tdC}><strong>${totalPending}</strong></td>
@@ -454,7 +458,7 @@ class AdvancedPOSTracker {
     this._bindOfficeFilters(cols);
 
     // Apply all filters (inline, global, toolbar dropdowns)
-    let { rows, dupSerials } = this._applyOfficeFilters(cols, centerKeys);
+    let { rows } = this._applyOfficeFilters(cols, centerKeys);
 
     // Safety: if everything filtered out unintentionally, show all
     if (!rows.length && (this.locations || []).length) rows = this.locations;
@@ -560,7 +564,7 @@ class AdvancedPOSTracker {
     });
   }
 
-  _applyOfficeFilters(cols, centerKeys){
+  _applyOfficeFilters(cols){
     const global = (document.getElementById("owd-global-search")?.value || "").trim().toLowerCase();
     const perCol = this.officeFilters || {};
     const keysForBlanks = cols.filter(c=>c.type!=='docs').map(c=>c.key);
@@ -765,47 +769,11 @@ class AdvancedPOSTracker {
     document.head.appendChild(style);
   }
 
-  // ---- Documents (PDF) storage & cell UI (unchanged) ----
-  _docCellHTML(loc){
-    const id = loc.id;
-    const list = this._loadDocs()[id] || [];
-    const links = list.map((d, i) => `<a href="${d.dataUrl}" target="_blank" rel="noopener">View ${i+1}</a>`).join(" &nbsp; ");
-    const canUpload = Array.isArray(this.uploadAllowedUsers)
-        ? this.uploadAllowedUsers.includes(this.currentUser)
-        : true; // null => allow all
-    const uploadBtn = canUpload
-      ? `<label class="btn btn-sm btn-secondary" style="margin:0;cursor:pointer;">
-           Upload<input type="file" accept="application/pdf" data-doc-for="${id}" style="display:none;">
-         </label>`
-      : "";
-    return `<div class="doc-actions">${links || '<span style="opacity:.6">—</span>'}${uploadBtn ? '&nbsp;'+uploadBtn : ''}</div>`;
-  }
-
-  _handleDocUpload(id, file){
-    if (!file || file.type !== "application/pdf"){ alert("Please select a PDF file."); return; }
-    const fr = new FileReader();
-    fr.onload = () => {
-      const db = this._loadDocs();
-      (db[id] ||= []).push({ name:file.name, dataUrl: fr.result, ts: Date.now() });
-      localStorage.setItem(this.docStorageKey, JSON.stringify(db));
-      this.renderOfficeDetails();
-    };
-    fr.readAsDataURL(file);
-  }
-
-  _loadDocs(){
-    try{ return JSON.parse(localStorage.getItem(this.docStorageKey) || "{}"); }catch{ return {}; }
-  }
-
-  _escape(v){
-    return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
-  }
-
-  // ---- PDF + CRUD + Import/Export + Backup (all frozen below) ----
+  // ---- PDF: Dashboard/Progress quick exports ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // ---- Reports PDF (ONLY function modified per latest request) ----
+  // ---- PDF: Professional Reports (updated per your latest requirements) ----
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
@@ -845,7 +813,7 @@ class AdvancedPOSTracker {
       return;
     }
 
-    // Helpers / formatting
+    // Setup / helpers
     const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
     const formatDMY = (d)=> {
       const dd = String(d.getDate()).padStart(2,"0");
@@ -885,14 +853,14 @@ class AdvancedPOSTracker {
       (byDiv[d] ||= []).push(r);
     });
 
-    // Sort divisions (RMS HB Division last)
+    // Division entries: alphabetical except "RMS HB Division" last
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
       return a.localeCompare(b);
     });
 
-    // Division-wise summary rows
+    // Rows for table (use full available width)
     const divisions = entries.map(([division, arr])=>{
       const offices = arr.length;
       const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
@@ -925,16 +893,25 @@ class AdvancedPOSTracker {
       pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
     };
 
-    // PDF doc + layout
+    // Precompute "devices received today" per division + office list
+    const todayDetails = entries.map(([division, arr])=>{
+      const officesToday = arr
+        .filter(l => normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr && toInt(l.noOfDevicesReceived) > 0)
+        .map(l => ({ name: l.postOfficeName || l.postOfficeId || "—", cnt: toInt(l.noOfDevicesReceived) }));
+      const totalToday = officesToday.reduce((s,o)=> s + o.cnt, 0);
+      return { division, officesToday, totalToday };
+    }).filter(x => x.totalToday > 0);
+
+    // PDF doc
     const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
     const margin = 32;
     let y = margin;
 
-    // Colors / fonts (HEADER DARKENED)
-    const headerFill = { r: 232, g: 237, b: 245 };  // slightly darker
-    const stripeFill = { r: 252, g: 253, b: 255 };
+    // Colors / fonts (header & total slightly darker; professional)
+    const headerFill = { r: 230, g: 237, b: 246 }; // darker than before
+    const stripeFill = { r: 245, g: 248, b: 252 };
     const borderGray = 180;
     const brandBlue = { r: 52, g: 152, b: 219 };
 
@@ -945,7 +922,7 @@ class AdvancedPOSTracker {
     const lineH     = 11;
     const padX      = 6;
 
-    // Table columns
+    // Table columns (labels + alignment)
     const tableCols = [
       { key:'division', label:'Division', align:'left'  },
       { key:'offices',  label:'Offices', align:'center'},
@@ -961,13 +938,14 @@ class AdvancedPOSTracker {
     const tableX = margin;
     const tableW = pageW - margin*2;
 
-    // Auto-fit widths
+    // --- Auto-fit column widths (fill full width) ---
     function computeAutoWidths(){
       const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
       doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
       const contentW = tableCols.map(() => 0);
+
       const consider = obj => {
         tableCols.forEach((c, i) => {
           const v = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
@@ -976,8 +954,10 @@ class AdvancedPOSTracker {
         });
       };
       divisions.forEach(consider); consider(totalsRow);
+
       let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
       let sumDesired = desired.reduce((a,b)=>a+b,0);
+
       if (sumDesired > tableW){
         const scale = tableW / sumDesired;
         desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
@@ -990,7 +970,9 @@ class AdvancedPOSTracker {
             if (slack > slackMax){ slackMax = slack; idx = i; }
           }
           if (idx < 0) break;
-          desired[idx] -= 1; sum -= 1; tries++;
+          desired[idx] -= 1;
+          sum -= 1;
+          tries++;
         }
       } else if (sumDesired < tableW){
         let leftover = tableW - sumDesired;
@@ -1010,7 +992,6 @@ class AdvancedPOSTracker {
       tableCols.forEach((c,i)=> c.w = desired[i]);
     }
 
-    // helpers
     function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
     function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
     function newPage(){ doc.addPage(); y = margin; drawHeader(); }
@@ -1037,6 +1018,7 @@ class AdvancedPOSTracker {
     // Region Summary
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Region Summary', margin, y); y += 12;
+
     doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
     const rsLeft = [
       ['Total Offices', String(totalOffices)],
@@ -1046,7 +1028,9 @@ class AdvancedPOSTracker {
       ['Total Devices received', String(totalDevicesReceived)],
       ['Devices received today', String(devicesReceivedToday)]
     ];
-    const colGap = 260, valOffset = 190;
+    const colGap = 260;
+    const valOffset = 190;
+
     rsLeft.forEach(([k,v],i)=>{
       ensureSpace(14);
       doc.text(`${k}:`, margin, y);
@@ -1060,7 +1044,7 @@ class AdvancedPOSTracker {
     });
     y += 6;
 
-    // compute widths
+    // Compute widths after we know rows
     computeAutoWidths();
 
     // Table header
@@ -1074,6 +1058,7 @@ class AdvancedPOSTracker {
       });
       const headerH = Math.max(...headerHeights);
 
+      // Full-width darker header background
       doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
       doc.rect(tableX, y, totalW, headerH, 'F');
@@ -1090,14 +1075,13 @@ class AdvancedPOSTracker {
         }
         x += c.w;
       });
+
       y += headerH;
     }
 
-    // Row drawer (supports header-style BG for Total row)
-    function drawRow(obj, opts={}){
-      const { stripe=false, bold=false, headerBg=false } = opts;
+    // Table row
+    function drawRow(obj, stripe=false, bold=false, fillMode=null){
       doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
-
       const cells = tableCols.map(col=>{
         const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
         const lines = doc.splitTextToSize(raw, col.w - padX*2);
@@ -1107,14 +1091,12 @@ class AdvancedPOSTracker {
       const rowH = Math.max(...cells.map(c => c.h));
       ensureSpace(rowH);
 
-      if (stripe){
-        doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
-        const totalW = tableCols.reduce((s,c)=>s+c.w,0);
-        doc.rect(tableX, y, totalW, rowH, 'F');
-      }
-      if (headerBg){
+      const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+      if (fillMode === 'header'){
         doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
-        const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+        doc.rect(tableX, y, totalW, rowH, 'F');
+      } else if (stripe){
+        doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
         doc.rect(tableX, y, totalW, rowH, 'F');
       }
 
@@ -1133,62 +1115,100 @@ class AdvancedPOSTracker {
       y += rowH;
     }
 
-    // Render Division-wise table
+    // Render table (full width)
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Division-wise Detailed Report', margin, y); y += 8;
     drawTableHeader();
+
     divisions.forEach((r, idx) => {
       if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
-      drawRow(r, { stripe: idx % 2 === 1 });
+      drawRow(r, idx % 2 === 1);
     });
+    // Totals row with same darker background as header
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
-    // Totals row with header-like background + bold
-    drawRow(totalsRow, { headerBg: true, bold: true });
+    drawRow(totalsRow, false, true, 'header');
 
-    // NEW: Devices received today — details (Division-wise)
-    const todayList = rows
-      .filter(l => normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr && toInt(l.noOfDevicesReceived) > 0);
-
-    if (todayList.length){
+    // ===== Devices received today — Details (Division-wise, aligned to table width) =====
+    if (todayDetails.length){
       y += 10;
       doc.setFont('helvetica','bold'); doc.setFontSize(12);
       doc.text('Devices received today — Details (Division-wise)', margin, y); y += 8;
 
-      const byDivToday = {};
-      todayList.forEach(l=>{
-        const d = l.division || '—';
-        (byDivToday[d] ||= []).push(l);
-      });
+      // Box aligned to table
+      const sectionX = tableX, sectionW = tableW;
+      const sectionPad = 8;
 
-      doc.setFont('helvetica','normal'); doc.setFontSize(9);
-      const maxWidth = pageW - margin*2;
-      const bullet = '• ';
+      // Estimate height & compress font if needed to keep single-page bias
+      const baseFontSizes = [10.5, 9.5, 9]; // will pick first that fits
+      let chosenFont = baseFontSizes[0];
 
-      const divNames = Object.keys(byDivToday).sort((a,b)=>{
-        if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
-        if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
-        return a.localeCompare(b);
-      });
-
-      divNames.forEach((dName, di)=>{
-        const offices = byDivToday[dName];
-        ensureSpace(14);
-        doc.setFont('helvetica','bold'); doc.text(dName, margin, y); y += 12;
-        doc.setFont('helvetica','normal');
-
-        offices.forEach(o=>{
-          const line = `${bullet}${o.postOfficeName || ''} — ${toInt(o.noOfDevicesReceived)}`;
-          const lines = doc.splitTextToSize(line, maxWidth);
-          ensureSpace(lines.length * lineH);
-          lines.forEach((ln, i)=> doc.text(ln, margin + 10, y + i*lineH));
-          y += lines.length * lineH;
+      const estimateHeight = (fontSize)=>{
+        let est = 0;
+        doc.setFont('helvetica','bold'); doc.setFontSize(fontSize);
+        todayDetails.forEach(div=>{
+          est += fontSize + 4; // division line
+          doc.setFont('helvetica','normal');
+          const bulletIndent = 14;
+          div.officesToday.forEach(it=>{
+            const line = `• ${it.name} — ${it.cnt}`;
+            const maxW = sectionW - sectionPad*2 - bulletIndent;
+            const lines = doc.splitTextToSize(line, maxW);
+            est += Math.max(fontSize+2, lines.length * (fontSize+2));
+          });
+          est += 6; // spacing between divisions
+          doc.setFont('helvetica','bold');
         });
+        return est + sectionPad*2 + 6;
+      };
 
-        if (di < divNames.length-1) { y += 6; }
+      let needed = estimateHeight(chosenFont);
+      const available = (pageH - margin) - y;
+      if (needed > available){
+        for (let i=1;i<baseFontSizes.length;i++){
+          chosenFont = baseFontSizes[i];
+          needed = estimateHeight(chosenFont);
+          if (needed <= available) break;
+        }
+      }
+      if (needed > available) { newPage(); } // if still large, start on fresh page
+      // Recompute available if moved
+      const boxH = estimateHeight(chosenFont);
+
+      // Draw container
+      setBorder();
+      doc.setFillColor(255,255,255);
+      doc.rect(sectionX, y, sectionW, boxH, 'S');
+
+      // Render content
+      let curY = y + sectionPad;
+      const bulletIndent = 14;
+      doc.setFont('helvetica','bold'); doc.setFontSize(chosenFont);
+      todayDetails.forEach(div=>{
+        // Division header with total today
+        const head = `${div.division} — total today: ${div.totalToday}`;
+        doc.text(head, sectionX + sectionPad, curY);
+        curY += chosenFont + 4;
+
+        // Items
+        doc.setFont('helvetica','normal');
+        const maxW = sectionW - sectionPad*2 - bulletIndent;
+        div.officesToday.forEach(it=>{
+          const line = `• ${it.name} — ${it.cnt}`;
+          const lines = doc.splitTextToSize(line, maxW);
+          lines.forEach((ln, i)=>{
+            const x = sectionX + sectionPad + (i===0 ? 0 : bulletIndent);
+            doc.text(ln, x, curY);
+            curY += chosenFont + 2;
+          });
+        });
+        curY += 6;
+        doc.setFont('helvetica','bold');
       });
+
+      y = curY + 2;
     }
 
-    // Footer
+    // Footer: page numbers + date on every page
     const pages = doc.getNumberOfPages();
     for (let i=1; i<=pages; i++){
       doc.setPage(i);
@@ -1210,6 +1230,7 @@ class AdvancedPOSTracker {
     doc.save(`${title.replace(/\s+/g,'-')}-${new Date().toISOString().slice(0,10)}.pdf`);
   }
 
+  // ---- CRUD ----
   showLocationForm(){ this.currentLocationId=null; document.getElementById("modalTitle").textContent="Add New Location"; document.getElementById("locationForm").reset(); document.getElementById("locationModal").style.display="block"; }
   closeLocationModal(){ document.getElementById("locationModal").style.display="none"; }
   saveLocation(event){
@@ -1251,6 +1272,7 @@ class AdvancedPOSTracker {
     this.saveToStorage(); this.displayLocations(); this.updateDashboard(); alert("Post Office deleted successfully!");
   }
 
+  // ---- Excel import/export ----
   downloadTemplate(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
     const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];

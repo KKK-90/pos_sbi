@@ -266,7 +266,7 @@ class AdvancedPOSTracker {
     this.renderLocationsList(filtered,"progressList");
   }
 
-  // ---- reports (frozen UI; PDF enhanced below) ----
+  // ---- reports (frozen HTML view) ----
   generateReports(){
     const host = document.getElementById("reportsContent");
     if (!host) return;
@@ -765,55 +765,19 @@ class AdvancedPOSTracker {
     document.head.appendChild(style);
   }
 
-  // ---- Documents (PDF) storage & cell UI (unchanged) ----
-  _docCellHTML(loc){
-    const id = loc.id;
-    const list = this._loadDocs()[id] || [];
-    const links = list.map((d, i) => `<a href="${d.dataUrl}" target="_blank" rel="noopener">View ${i+1}</a>`).join(" &nbsp; ");
-    const canUpload = Array.isArray(this.uploadAllowedUsers)
-        ? this.uploadAllowedUsers.includes(this.currentUser)
-        : true; // null => allow all
-    const uploadBtn = canUpload
-      ? `<label class="btn btn-sm btn-secondary" style="margin:0;cursor:pointer;">
-           Upload<input type="file" accept="application/pdf" data-doc-for="${id}" style="display:none;">
-         </label>`
-      : "";
-    return `<div class="doc-actions">${links || '<span style="opacity:.6">—</span>'}${uploadBtn ? '&nbsp;'+uploadBtn : ''}</div>`;
-  }
-
-  _handleDocUpload(id, file){
-    if (!file || file.type !== "application/pdf"){ alert("Please select a PDF file."); return; }
-    const fr = new FileReader();
-    fr.onload = () => {
-      const db = this._loadDocs();
-      (db[id] ||= []).push({ name:file.name, dataUrl: fr.result, ts: Date.now() });
-      localStorage.setItem(this.docStorageKey, JSON.stringify(db));
-      this.renderOfficeDetails();
-    };
-    fr.readAsDataURL(file);
-  }
-
-  _loadDocs(){
-    try{ return JSON.parse(localStorage.getItem(this.docStorageKey) || "{}"); }catch{ return {}; }
-  }
-
-  _escape(v){
-    return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
-  }
-
-  // ---- PDF + CRUD + Import/Export + Backup (all frozen below) ----
+  // ---- PDF + CRUD + Import/Export + Backup ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // ===== Enhanced Reports PDF (with "Devices received today" section) =====
+  // === UPDATED: Export Reports PDF (section for "Devices received today — Division-wise" moved to a fresh page; darker header & Total row) ===
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
 
-    // Orientation chooser
+    // Orientation chooser (radio buttons)
     if (!opts || !opts.orientation){
       const id = "pdf-orient-overlay";
-      if (document.getElementById(id)) return;
+      if (document.getElementById(id)) return; // already open
       const overlay = document.createElement("div");
       overlay.id = id;
       overlay.innerHTML = `
@@ -869,11 +833,13 @@ class AdvancedPOSTracker {
     const today = new Date();
     const reportDateStr = formatDMY(today);
 
-    // Aggregates
+    // Aggregates (region)
     const totalOffices = rows.length;
     const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
     const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
     const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+
+    // Devices received today (for Region Summary + detailed section)
     const devicesReceivedToday = rows.reduce((s,l)=> {
       return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
     }, 0);
@@ -925,18 +891,25 @@ class AdvancedPOSTracker {
       pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
     };
 
-    // Build "Devices received today" detail list (grouped by division)
-    const todayGroups = entries.map(([division, arr])=>{
-      const list = arr
-        .filter(r => normalizeToDMY(r.dateOfReceiptOfDevice) === reportDateStr && toInt(r.noOfDevicesReceived) > 0)
-        .map(r => ({
-          division,
-          po: `${r.postOfficeName || ""}${r.postOfficeId ? " ("+r.postOfficeId+")" : ""}`,
-          n: toInt(r.noOfDevicesReceived)
-        }));
-      const totalToday = list.reduce((s,x)=> s + x.n, 0);
-      return { division, items: list, totalToday };
-    }).filter(g => g.items.length > 0);
+    // Build "received today — division wise" structure
+    const byDivToday = {};
+    rows.forEach(r=>{
+      const dmy = normalizeToDMY(r.dateOfReceiptOfDevice);
+      const n = toInt(r.noOfDevicesReceived);
+      if (dmy === reportDateStr && n > 0){
+        const div = r.division || "—";
+        (byDivToday[div] ||= []).push({
+          name: r.postOfficeName || "",
+          id: r.postOfficeId || "",
+          n
+        });
+      }
+    });
+    const todayDivEntries = Object.entries(byDivToday).sort(([a],[b])=>{
+      if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
+      if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
+      return a.localeCompare(b);
+    });
 
     // PDF doc
     const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
@@ -945,11 +918,11 @@ class AdvancedPOSTracker {
     const margin = 32;
     let y = margin;
 
-    // Colors / fonts
-    const headerFill = { r: 232, g: 236, b: 246 };  // darker than before for pro look
-    const stripeFill = { r: 248, g: 250, b: 255 };  // subtle zebra
+    // Colors / fonts (header + total row made slightly darker than before)
+    const headerFill = { r: 232, g: 236, b: 244 };  // darker professional header
+    const stripeFill = { r: 248, g: 250, b: 254 };  // subtle zebra
     const borderGray = 180;
-    const brandBlue = { r: 52, g: 152, b: 219 };
+    const brandBlue  = { r: 52,  g: 152, b: 219 };
 
     const fontTitle = 15;
     const fontSub   = 11;
@@ -989,8 +962,7 @@ class AdvancedPOSTracker {
           if (w > contentW[i]) contentW[i] = w;
         });
       };
-      divisions.forEach(consider);
-      consider(totalsRow);
+      divisions.forEach(consider); consider(totalsRow);
 
       let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
       let sumDesired = desired.reduce((a,b)=>a+b,0);
@@ -1053,7 +1025,7 @@ class AdvancedPOSTracker {
     }
     drawHeader();
 
-    // Region Summary
+    // Region Summary (two columns) — includes "Devices received today"
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Region Summary', margin, y); y += 12;
 
@@ -1082,13 +1054,13 @@ class AdvancedPOSTracker {
     });
     y += 6;
 
-    // Main table
+    // compute auto widths now that we know rows
     computeAutoWidths();
 
+    // Table header (full-width background)
     function drawTableHeader(){
       ensureSpace(24);
       setBorder();
-      // compute header height from wrapped labels
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerHeights = tableCols.map(c => {
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
@@ -1096,7 +1068,7 @@ class AdvancedPOSTracker {
       });
       const headerH = Math.max(...headerHeights);
 
-      // Full-width darker header background
+      // Single full-width background
       doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
       doc.rect(tableX, y, totalW, headerH, 'F');
@@ -1114,11 +1086,11 @@ class AdvancedPOSTracker {
         }
         x += c.w;
       });
-
       y += headerH;
     }
 
-    function drawRow(obj, stripe=false, bold=false, bgFill=null){
+    // Table row (supports zebra, bold, and custom fill e.g., Total row)
+    function drawRow(obj, stripe=false, bold=false, fill=null){
       doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
       const cells = tableCols.map(col=>{
         const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
@@ -1130,8 +1102,8 @@ class AdvancedPOSTracker {
       ensureSpace(rowH);
 
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
-      if (bgFill){
-        doc.setFillColor(bgFill.r, bgFill.g, bgFill.b);
+      if (fill){
+        doc.setFillColor(fill.r, fill.g, fill.b);
         doc.rect(tableX, y, totalW, rowH, 'F');
       } else if (stripe){
         doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
@@ -1162,110 +1134,91 @@ class AdvancedPOSTracker {
       if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
       drawRow(r, idx % 2 === 1);
     });
-    // Totals row with same (darker) background as header
+
+    // Totals row (fill with same color as header, and bold)
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
     drawRow(totalsRow, false, true, headerFill);
 
-    // ------ Devices received today — Division-wise list ------
-    if (todayGroups.length){
-      y += 12;
+    // === NEW PAGE for "Devices received today — Division-wise" (clean, professional) ===
+    const startDevicesTodaySection = () => {
+      newPage();
       doc.setFont('helvetica','bold'); doc.setFontSize(12);
-      doc.text('Devices received today — Division-wise', margin, y); y += 6;
+      doc.text('Devices received today — Division-wise', margin, y); y += 10;
+      setBorder(); doc.line(margin, y, pageW - margin, y); y += 8;
+    };
 
-      // Define compact table for this section
-      const cols2 = [
-        { key:'division', label:'Division', align:'left'  },
-        { key:'po',       label:'Post Office', align:'left' },
-        { key:'n',        label:'Devices Today', align:'center' }
-      ];
+    // Only render if there is any data for today
+    if (todayDivEntries.length){
+      startDevicesTodaySection();
 
-      // Flatten rows with group headers
-      const rows2 = [];
-      todayGroups.forEach(g=>{
-        rows2.push({ _group:true, division:g.division, total:g.totalToday });
-        g.items.forEach(it => rows2.push({ division:g.division, po:it.po, n:it.n }));
-      });
+      // Layout for this section: a repeated block per division with a small table (Post Office | Devices Today)
+      const nameColW = pageW - margin*2 - 90; // leave ~90pt for count column
+      const countColW = 90;
 
-      // Auto widths
-      const min2 = [110, 220, 80];
-      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-      const headW2 = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
-      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-      const contentW2 = cols2.map(() => 0);
-      rows2.forEach(r=>{
-        cols2.forEach((c,i)=>{
-          const raw = r._group
-            ? (c.key==='division' ? `${r.division}  —  Total Today: ${r.total}` : '')
-            : String(r[c.key] ?? '');
-          const w = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
-          if (w > contentW2[i]) contentW2[i] = w;
-        });
-      });
-      let desired2 = cols2.map((c,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
-      const tableW2 = pageW - margin*2;
-      let sum2 = desired2.reduce((a,b)=>a+b,0);
-      if (sum2 > tableW2){
-        const scale = tableW2 / sum2;
-        desired2 = desired2.map((w,i)=> Math.max(min2[i], Math.floor(w*scale)));
-        sum2 = desired2.reduce((a,b)=>a+b,0);
-      } else if (sum2 < tableW2){
-        // expand Post Office col preferentially
-        let leftover = tableW2 - sum2;
-        while (leftover-- > 0) desired2[1] += 1;
-        sum2 = tableW2;
-      }
-      cols2.forEach((c,i)=> c.w = desired2[i]);
+      const drawDivisionBlock = (division, items) => {
+        // Division header bar
+        const totalToday = items.reduce((s, it) => s + toInt(it.n), 0);
+        const barH = 18;
+        ensureSpace(barH + 10);
+        doc.setFillColor(243, 246, 252);
+        doc.rect(margin, y, pageW - margin*2, barH, 'F');
+        doc.setFont('helvetica','bold'); doc.setFontSize(10.5);
+        doc.text(`${division} — Total Today: ${totalToday}`, margin + 8, y + 12);
+        y += barH + 6;
 
-      // Draw header
-      const drawHeader2 = ()=>{
-        ensureSpace(22);
+        // Table header
+        const thH = 16;
+        ensureSpace(thH);
+        doc.setFillColor(250, 251, 253);
+        doc.rect(margin, y, nameColW, thH, 'F');
+        doc.rect(margin + nameColW, y, countColW, thH, 'F');
         setBorder();
-        const headerH = 22;
-        doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
-        doc.rect(margin, y, tableW2, headerH, 'F');
-        let xx = margin;
-        cols2.forEach(c=>{
-          doc.rect(xx, y, c.w, headerH, 'S');
-          doc.text(c.label, c.align==='left' ? xx+padX : xx + c.w/2, y + 14, { align: c.align==='left'?'left':'center' });
-          xx += c.w;
-        });
-        y += headerH;
-      };
-      drawHeader2();
+        doc.rect(margin, y, nameColW, thH, 'S');
+        doc.rect(margin + nameColW, y, countColW, thH, 'S');
+        doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
+        doc.text('Post Office', margin + 6, y + 12);
+        doc.text('Devices Today', margin + nameColW + countColW/2, y + 12, { align:'center' });
+        y += thH;
 
-      // Draw rows
-      rows2.forEach((r, idx)=>{
-        if (r._group){
-          // group row spanning all columns
-          const text = `${r.division} — Total Today: ${r.total}`;
-          const h = 18;
-          ensureSpace(h);
-          doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
-          doc.rect(margin, y, tableW2, h, 'F');
-          setBorder(); doc.rect(margin, y, tableW2, h, 'S');
-          doc.setFont('helvetica','bold'); doc.setFontSize(fontBody);
-          doc.text(text, margin + padX, y + 12);
-          y += h;
-        } else {
-          // normal item row
-          doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-          const h = 18;
-          ensureSpace(h);
-          let xx = margin;
+        // Rows
+        doc.setFont('helvetica','normal'); doc.setFontSize(9);
+        items.forEach((it, idx)=>{
+          const rowText = `${it.name}${it.id ? ` (${it.id})` : ''}`;
+          const lines = doc.splitTextToSize(rowText, nameColW - 10);
+          const rowH = Math.max(16, lines.length * lineH);
+          ensureSpace(rowH);
+          if (idx % 2 === 0){
+            doc.setFillColor(252,253,255);
+            doc.rect(margin, y, nameColW + countColW, rowH, 'F');
+          }
           setBorder();
-          cols2.forEach((c,i)=>{
-            const raw = String(r[c.key] ?? '');
-            doc.rect(xx, y, c.w, h, 'S');
-            if (c.align === 'left'){
-              doc.text(raw, xx + padX, y + 12);
-            } else {
-              doc.text(raw, xx + c.w/2, y + 12, { align:'center' });
-            }
-            xx += c.w;
-          });
-          y += h;
-        }
+          doc.rect(margin, y, nameColW, rowH, 'S');
+          doc.rect(margin + nameColW, y, countColW, rowH, 'S');
+
+          // text
+          lines.forEach((ln, i)=> doc.text(ln, margin + 6, y + 11 + i*lineH));
+          doc.text(String(it.n), margin + nameColW + countColW - 8, y + 11, { align:'right' });
+          y += rowH;
+        });
+
+        y += 6; // spacing after block
+      };
+
+      // Render division blocks (across as many pages as needed)
+      todayDivEntries.forEach(([div, arr])=>{
+        // If near page end, move to next page to keep header + at least one row together
+        if (y > pageH - margin - 60) { newPage(); }
+        drawDivisionBlock(div, arr);
       });
+    } else {
+      // If no today's data, still keep a neat section on a fresh page
+      newPage();
+      doc.setFont('helvetica','bold'); doc.setFontSize(12);
+      doc.text('Devices received today — Division-wise', margin, y); y += 10;
+      setBorder(); doc.line(margin, y, pageW - margin, y); y += 14;
+      doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
+      doc.text('No devices were received today.', margin, y);
+      y += 12;
     }
 
     // Footer: page numbers + date on every page
@@ -1353,6 +1306,8 @@ class AdvancedPOSTracker {
     XLSX.writeFile(wb,`POS_Data_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
   }
   exportToExcel(){ this.exportCurrentData(); }
+
+  // ---- Import / Backup / Restore (frozen) ----
   showImportModal(){ document.getElementById("importModal").style.display="block"; }
   closeImportModal(){ document.getElementById("importModal").style.display="none"; document.getElementById("importPreview").classList.add("hidden"); document.getElementById("excelFileInput").value=""; }
   handleExcelImport(event){

@@ -126,3 +126,26 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
   .modal-content{margin:20px;padding:25px;width:calc(100% - 40px)}
   .user-buttons{grid-template-columns:1fr}
 }
+
+/* Office-wise: auto-fit columns + keep header words intact */
+#officeDetailsTable { table-layout: auto; }
+#officeDetailsTable thead th {
+  white-space: nowrap;
+  word-break: keep-all;
+}
+#officeDetailsTable td { vertical-align: middle; text-align: center; }
+#officeDetailsTable td.left, #officeDetailsTable th.left { text-align: left; }
+
+/* Inline filters row (just below header) */
+.data-table thead .col-filter th {
+  background:#fff; padding:8px; border-bottom:1px solid #e1e5e9;
+}
+.data-table thead .col-filter input,
+.data-table thead .col-filter select {
+  width:100%; padding:6px 8px; border:1px solid #d8dee5;
+  border-radius:6px; font-size:12px; background:#fff;
+}
+
+/* Blank cells highlighted (light red) */
+td.cell-blank { background:#fdecea !important; }
+

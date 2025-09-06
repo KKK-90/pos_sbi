@@ -73,9 +73,6 @@ class AdvancedPOSTracker {
     window.addEventListener("click", (evt) => {
       document.querySelectorAll(".modal").forEach(m => { if (evt.target === m) m.style.display = "none"; });
     });
-
-    // Bind Reports Print button as a safety net (in case tab switching didn’t bind yet)
-    this._bindReportsPrintButton();
   }
 
   // ---- tabs ----
@@ -90,21 +87,11 @@ class AdvancedPOSTracker {
         if (btn.getAttribute("onclick")?.includes(`'${tabName}'`)) btn.classList.add("active");
       });
     }
-
-    // Freeze logic: only Reports is frozen (except Print button)
-    if (tabName === "reports") this._freezeReportsPage(true);
-    else this._freezeReportsPage(false);
-
     switch (tabName) {
       case "dashboard": this.updateDashboard(); break;
       case "locations": this.renderOfficeDetails(); break;   // OWD table
       case "progress": this.displayProgress(); this.updateProgressFilters(); break;
-      case "reports":
-        this.generateReports();
-        // ensure button exists/bound and stays interactive while page is frozen
-        this._bindReportsPrintButton();
-        this._freezeReportsPage(true);
-        break;
+      case "reports": this.generateReports(); break;
       case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
     }
   }
@@ -467,7 +454,7 @@ class AdvancedPOSTracker {
     this._bindOfficeFilters(cols);
 
     // Apply all filters (inline, global, toolbar dropdowns)
-    let { rows } = this._applyOfficeFilters(cols, centerKeys);
+    let { rows, dupSerials } = this._applyOfficeFilters(cols, centerKeys);
 
     // Safety: if everything filtered out unintentionally, show all
     if (!rows.length && (this.locations || []).length) rows = this.locations;
@@ -495,7 +482,7 @@ class AdvancedPOSTracker {
       }).join("")}</tr>`;
     }).join("");
 
-    // Statistics
+    // Statistics: rows count + blank field stats
     const stats = this._blankStats(this.locations, cols);
     if (meta) {
       const total = (this.locations || []).length;
@@ -512,11 +499,26 @@ class AdvancedPOSTracker {
       global.addEventListener("input", () => this.renderOfficeDetails());
     }
 
+    // Delegate upload change events (bind once)
+    const wrap = table.closest(".table-scroll") || table.parentElement;
+    if (wrap && !wrap._owdBound){
+      wrap._owdBound = true;
+      wrap.addEventListener("change", (e)=>{
+        const inp = e.target;
+        if (inp?.matches('input[type="file"][data-doc-for]')){
+          const id = parseInt(inp.getAttribute("data-doc-for"),10);
+          const file = inp.files?.[0];
+          if (file) this._handleDocUpload(id, file);
+        }
+      });
+    }
+
     // Synchronized top horizontal scrollbar (sticky)
     this._setupHorizontalSync(table);
   }
 
   _owdColumns(){
+    // Order and names remain as existing Excel/template + extra columns; header wording unchanged
     return [
       { key:'slNo',                      label:'Sl.No.' },
       { key:'division',                  label:'Division' },
@@ -574,6 +576,7 @@ class AdvancedPOSTracker {
         if (!cell.includes(v.toLowerCase())) return false;
       }
 
+      // Toolbar dropdowns
       if (this.topFilters.division && (loc.division||"") !== this.topFilters.division) return false;
       if (this.topFilters.install && (loc.installationStatus||"") !== this.topFilters.install) return false;
       if (this.topFilters.func && (loc.functionalityStatus||"") !== this.topFilters.func) return false;
@@ -622,6 +625,7 @@ class AdvancedPOSTracker {
     const search = document.getElementById("owd-global-search");
     if (!search) return;
 
+    // create container once, right after the search input
     let box = document.getElementById("owd-top-filters");
     if (!box){
       box = document.createElement("div");
@@ -629,10 +633,12 @@ class AdvancedPOSTracker {
       box.style.display = "flex";
       box.style.flexWrap = "wrap";
       box.style.gap = "8px";
+      // place next to the search field
       const parent = search.parentElement || search.closest(".filters") || document.querySelector("#locations .filters") || document.body;
       parent.appendChild(box);
     }
 
+    // helper to create select
     const makeSelect = (id, label) => {
       let sel = document.getElementById(id);
       if (!sel){
@@ -642,6 +648,7 @@ class AdvancedPOSTracker {
         sel.style.minWidth = "170px";
         sel.setAttribute("aria-label", label);
         sel.addEventListener("change", ()=>{
+          // update state
           if (id==="owd-dd-division") this.topFilters.division = sel.value;
           if (id==="owd-dd-install")  this.topFilters.install  = sel.value;
           if (id==="owd-dd-func")     this.topFilters.func     = sel.value;
@@ -653,21 +660,25 @@ class AdvancedPOSTracker {
       return sel;
     };
 
+    // Division
     const divisions = Array.from(new Set((this.locations||[]).map(l=>l.division).filter(Boolean))).sort();
     const sDiv = makeSelect("owd-dd-division","Division");
     sDiv.innerHTML = `<option value="">All Divisions</option>${divisions.map(d=>`<option value="${this._escape(d)}">${this._escape(d)}</option>`).join("")}`;
     sDiv.value = this.topFilters.division;
 
+    // Installation status
     const insts = Array.from(new Set((this.locations||[]).map(l=>l.installationStatus).filter(Boolean))).sort();
     const sIns = makeSelect("owd-dd-install","Installation status");
     sIns.innerHTML = `<option value="">All Installation status</option>${insts.map(s=>`<option value="${this._escape(s)}">${this._escape(s)}</option>`).join("")}`;
     sIns.value = this.topFilters.install;
 
+    // Functionality status
     const funcs = Array.from(new Set((this.locations||[]).map(l=>l.functionalityStatus).filter(Boolean))).sort();
     const sFun = makeSelect("owd-dd-func","Functionality status");
     sFun.innerHTML = `<option value="">All Functionality status</option>${funcs.map(s=>`<option value="${this._escape(s)}">${this._escape(s)}</option>`).join("")}`;
     sFun.value = this.topFilters.func;
 
+    // Blank fields dropdown
     const sBlank = makeSelect("owd-dd-blanks","Blank fields");
     sBlank.innerHTML = `
       <option value="all">All rows</option>
@@ -681,15 +692,18 @@ class AdvancedPOSTracker {
     const wrap = table.closest(".table-scroll") || table.parentElement;
     if (!wrap) return;
 
+    // Make top scroller once
     let top = document.getElementById("owd-hscroll-top");
     if (!top){
       top = document.createElement("div");
       top.id = "owd-hscroll-top";
       top.className = "owd-hscroll";
       top.innerHTML = `<div class="owd-hscroll-inner"></div>`;
+      // insert above the table wrapper
       wrap.parentElement.insertBefore(top, wrap);
     }
 
+    // Size the fake inner to table width
     const inner = top.querySelector(".owd-hscroll-inner");
     const syncWidth = () => { inner.style.width = table.scrollWidth + "px"; };
     syncWidth();
@@ -698,6 +712,7 @@ class AdvancedPOSTracker {
       this._owdResizeObs.observe(table);
     }
 
+    // Sync scroll positions (both ways)
     const sync = (src, dst) => {
       let ticking = false;
       src.addEventListener("scroll", ()=>{
@@ -709,14 +724,14 @@ class AdvancedPOSTracker {
         });
       });
     };
-    const wrapEl = wrap; const topEl = top;
-    sync(topEl, wrapEl);
-    sync(wrapEl, topEl);
+    sync(top, wrap);
+    sync(wrap, top);
   }
 
   _ensureOWDStyles(){
     if (document.getElementById("owd-enhanced-style")) return;
     const css = `
+/* ===== Office wise details (scoped) ===== */
 #owd-hscroll-top.owd-hscroll{
   position: sticky; top: 0; z-index: 3;
   height: 14px; overflow-x: auto; overflow-y: hidden;
@@ -732,14 +747,16 @@ class AdvancedPOSTracker {
 }
 .owd-table th:first-child, .owd-table td:first-child{ border-left: 1px solid #e6ebf2; }
 .owd-table thead th{ border-top: 1px solid #e6ebf2; background:#f8fafc; text-align:center; }
-.owd-table thead tr.header th{ position: sticky; top: 0; z-index: 2; }
+.owd-table thead tr.header th{
+  position: sticky; top: 0; z-index: 2; /* stick header with filters inside */
+}
 #owd-thead .owd-filter-wrap{ margin-top: 6px; }
 #owd-thead .owd-filter{
   width: 100%; padding: 6px 8px; font-size: 13px;
   border: 1px solid #dfe4ea; border-radius: 6px; background:#fff;
 }
-.cell-empty{ background:#fdecec; }
-.cell-dup{ background:#fff3cd; }
+.cell-empty{ background:#fdecec; }   /* blanks light red */
+.cell-dup{ background:#fff3cd; }     /* dup serials light amber */
 .doc-actions{ display:flex; gap:8px; justify-content:center; }
     `.trim();
     const style = document.createElement("style");
@@ -748,14 +765,14 @@ class AdvancedPOSTracker {
     document.head.appendChild(style);
   }
 
-  // ---- Documents (PDF) storage & cell UI ----
+  // ---- Documents (PDF) storage & cell UI (unchanged) ----
   _docCellHTML(loc){
     const id = loc.id;
     const list = this._loadDocs()[id] || [];
     const links = list.map((d, i) => `<a href="${d.dataUrl}" target="_blank" rel="noopener">View ${i+1}</a>`).join(" &nbsp; ");
     const canUpload = Array.isArray(this.uploadAllowedUsers)
         ? this.uploadAllowedUsers.includes(this.currentUser)
-        : true;
+        : true; // null => allow all
     const uploadBtn = canUpload
       ? `<label class="btn btn-sm btn-secondary" style="margin:0;cursor:pointer;">
            Upload<input type="file" accept="application/pdf" data-doc-for="${id}" style="display:none;">
@@ -784,15 +801,16 @@ class AdvancedPOSTracker {
     return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
   }
 
-  // ---- PDF + CRUD + Import/Export + Backup ----
+  // ---- PDF + CRUD + Import/Export + Backup (all frozen below) ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // ===== Enhanced Reports PDF (fresh page for “Devices received today — Division-wise”) =====
+  // ===== Enhanced Reports PDF (moved "Devices received today — Division-wise" to a fresh page) =====
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
 
+    // Orientation chooser
     if (!opts || !opts.orientation){
       const id = "pdf-orient-overlay";
       if (document.getElementById(id)) return;
@@ -827,9 +845,14 @@ class AdvancedPOSTracker {
       return;
     }
 
-    // Helpers (unchanged core)
+    // Setup / helpers
     const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
-    const formatDMY = (d)=> `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+    const formatDMY = (d)=> {
+      const dd = String(d.getDate()).padStart(2,"0");
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    };
     const toInt = v => parseInt(v) || 0;
     const normalizeToDMY = (val)=>{
       if (!val) return null;
@@ -846,6 +869,7 @@ class AdvancedPOSTracker {
     const today = new Date();
     const reportDateStr = formatDMY(today);
 
+    // Aggregates
     const totalOffices = rows.length;
     const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
     const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
@@ -854,18 +878,21 @@ class AdvancedPOSTracker {
       return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
     }, 0);
 
+    // Group by division
     const byDiv = {};
     rows.forEach(r=>{
       const d = r.division || "—";
       (byDiv[d] ||= []).push(r);
     });
 
+    // Division entries: alphabetical except "RMS HB Division" last
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
       return a.localeCompare(b);
     });
 
+    // Rows for main table
     const divisions = entries.map(([division, arr])=>{
       const offices = arr.length;
       const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
@@ -898,7 +925,7 @@ class AdvancedPOSTracker {
       pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
     };
 
-    // Today groups (for second page)
+    // Build "Devices received today" detail list (grouped by division)
     const todayGroups = entries.map(([division, arr])=>{
       const list = arr
         .filter(r => normalizeToDMY(r.dateOfReceiptOfDevice) === reportDateStr && toInt(r.noOfDevicesReceived) > 0)
@@ -912,21 +939,26 @@ class AdvancedPOSTracker {
     }).filter(g => g.items.length > 0);
 
     // PDF doc
-    const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
     const margin = 32;
     let y = margin;
 
-    const headerFill = { r: 232, g: 236, b: 246 }; // darker fill (header + Total row)
-    const stripeFill = { r: 248, g: 250, b: 255 };
+    // Colors / fonts
+    const headerFill = { r: 232, g: 236, b: 246 };  // darker matching fill (header + Total row)
+    const stripeFill = { r: 248, g: 250, b: 255 };  // subtle zebra
     const borderGray = 180;
     const brandBlue = { r: 52, g: 152, b: 219 };
 
-    const fontTitle = 15, fontSub = 11, fontHead = 9.5, fontBody = 9;
-    const lineH = 11, padX = 6;
+    const fontTitle = 15;
+    const fontSub   = 11;
+    const fontHead  = 9.5;
+    const fontBody  = 9;
+    const lineH     = 11;
+    const padX      = 6;
 
+    // Table columns (labels + alignment)
     const tableCols = [
       { key:'division', label:'Division', align:'left'  },
       { key:'offices',  label:'Offices', align:'center'},
@@ -942,12 +974,14 @@ class AdvancedPOSTracker {
     const tableX = margin;
     const tableW = pageW - margin*2;
 
+    // --- Auto-fit column widths (measure header + content) ---
     function computeAutoWidths(){
       const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
       doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
       const contentW = tableCols.map(() => 0);
+
       const consider = obj => {
         tableCols.forEach((c, i) => {
           const v = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
@@ -955,9 +989,12 @@ class AdvancedPOSTracker {
           if (w > contentW[i]) contentW[i] = w;
         });
       };
-      divisions.forEach(consider); consider(totalsRow);
+      divisions.forEach(consider);
+      consider(totalsRow);
+
       let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
       let sumDesired = desired.reduce((a,b)=>a+b,0);
+
       if (sumDesired > tableW){
         const scale = tableW / sumDesired;
         desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
@@ -992,6 +1029,7 @@ class AdvancedPOSTracker {
       tableCols.forEach((c,i)=> c.w = desired[i]);
     }
 
+    // helpers
     function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
     function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
     function newPage(){ doc.addPage(); y = margin; drawHeader(); }
@@ -1000,21 +1038,25 @@ class AdvancedPOSTracker {
       return rowTop + (rowH - contentH)/2 + lineH*0.85;
     }
 
+    // Header
     function drawHeader(){
       doc.setFont('helvetica','bold'); doc.setFontSize(fontTitle);
       doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
       doc.text('North Karnataka Region', margin, y); y += 18;
+
       doc.setTextColor(0,0,0);
       doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
       doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
       doc.text(`Report for the date: ${reportDateStr}`, margin, y); y += 8;
+
       setBorder(); doc.line(margin, y, pageW - margin, y); y += 16;
     }
     drawHeader();
 
-    // Region summary
+    // Region Summary
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Region Summary', margin, y); y += 12;
+
     doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
     const rsLeft = [
       ['Total Offices', String(totalOffices)],
@@ -1024,7 +1066,9 @@ class AdvancedPOSTracker {
       ['Total Devices received', String(totalDevicesReceived)],
       ['Devices received today', String(devicesReceivedToday)]
     ];
-    const colGap = 260, valOffset = 190;
+    const colGap = 260; // right column group start
+    const valOffset = 190; // value alignment width
+
     rsLeft.forEach(([k,v],i)=>{
       ensureSpace(14);
       doc.text(`${k}:`, margin, y);
@@ -1040,18 +1084,24 @@ class AdvancedPOSTracker {
 
     // Main table
     computeAutoWidths();
+
     function drawTableHeader(){
       ensureSpace(24);
       setBorder();
+      // compute header height from wrapped labels
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerHeights = tableCols.map(c => {
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
         return Math.max(18, lines.length * lineH + 6);
       });
       const headerH = Math.max(...headerHeights);
-      doc.setFillColor(232,236,246);
+
+      // Full-width darker header background
+      doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
       doc.rect(tableX, y, totalW, headerH, 'F');
+
+      // Per-cell borders + text
       let x = tableX;
       tableCols.forEach(c=>{
         doc.rect(x, y, c.w, headerH, 'S');
@@ -1064,8 +1114,10 @@ class AdvancedPOSTracker {
         }
         x += c.w;
       });
+
       y += headerH;
     }
+
     function drawRow(obj, stripe=false, bold=false, bgFill=null){
       doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
       const cells = tableCols.map(col=>{
@@ -1076,9 +1128,16 @@ class AdvancedPOSTracker {
       });
       const rowH = Math.max(...cells.map(c => c.h));
       ensureSpace(rowH);
+
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
-      if (bgFill){ doc.setFillColor(bgFill.r, bgFill.g, bgFill.b); doc.rect(tableX, y, totalW, rowH, 'F'); }
-      else if (stripe){ doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b); doc.rect(tableX, y, totalW, rowH, 'F'); }
+      if (bgFill){
+        doc.setFillColor(bgFill.r, bgFill.g, bgFill.b);
+        doc.rect(tableX, y, totalW, rowH, 'F');
+      } else if (stripe){
+        doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
+        doc.rect(tableX, y, totalW, rowH, 'F');
+      }
+
       setBorder();
       let x = tableX;
       cells.forEach(({col,lines})=>{
@@ -1094,33 +1153,42 @@ class AdvancedPOSTracker {
       y += rowH;
     }
 
+    // Render main table
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Division-wise Detailed Report', margin, y); y += 8;
     drawTableHeader();
+
     divisions.forEach((r, idx) => {
       if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
       drawRow(r, idx % 2 === 1);
     });
+    // Totals row with same (darker) background as header
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
     drawRow(totalsRow, false, true, headerFill);
 
-    // Fresh page for "Devices received today — Division-wise"
+    // ------ Devices received today — Division-wise (start on a FRESH PAGE) ------
     if (todayGroups.length){
+      // Force new page for professional separation
       newPage();
-      doc.setFont('helvetica','bold'); doc.setFontSize(12);
-      doc.text('Devices received today — Division-wise', margin, y); y += 8;
 
+      doc.setFont('helvetica','bold'); doc.setFontSize(12);
+      doc.text('Devices received details', margin, y); y += 8;
+
+      // Compact, professional full-width table
       const cols2 = [
         { key:'division', label:'Division', align:'left'  },
         { key:'po',       label:'Post Office', align:'left' },
-        { key:'n',        label:'Devices Today', align:'center' }
+        { key:'n',        label:'Devices', align:'center' }
       ];
+
+      // Flatten rows with group headers
       const rows2 = [];
       todayGroups.forEach(g=>{
         rows2.push({ _group:true, division:g.division, total:g.totalToday });
         g.items.forEach(it => rows2.push({ division:g.division, po:it.po, n:it.n }));
       });
 
+      // Auto widths to use the full page width
       const min2 = [110, 220, 90];
       const tableW2 = pageW - margin*2;
 
@@ -1128,6 +1196,7 @@ class AdvancedPOSTracker {
       const headW2 = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
       doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
       const contentW2 = cols2.map(() => 0);
+
       rows2.forEach(r=>{
         cols2.forEach((c,i)=>{
           const raw = r._group
@@ -1137,13 +1206,16 @@ class AdvancedPOSTracker {
           if (w > contentW2[i]) contentW2[i] = w;
         });
       });
+
       let desired2 = cols2.map((c,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
       let sum2 = desired2.reduce((a,b)=>a+b,0);
+
       if (sum2 > tableW2){
         const scale = tableW2 / sum2;
         desired2 = desired2.map((w,i)=> Math.max(min2[i], Math.floor(w*scale)));
         sum2 = desired2.reduce((a,b)=>a+b,0);
       } else if (sum2 < tableW2){
+        // expand Post Office column to fill leftover first, then Division
         let leftover = tableW2 - sum2;
         while (leftover > 0){
           if (leftover) { desired2[1] += 1; leftover--; }
@@ -1154,6 +1226,7 @@ class AdvancedPOSTracker {
       }
       cols2.forEach((c,i)=> c.w = desired2[i]);
 
+      // Draw header
       const drawHeader2 = ()=>{
         const headerH = 22;
         setBorder();
@@ -1169,9 +1242,10 @@ class AdvancedPOSTracker {
       };
       drawHeader2();
 
+      // Draw rows
       rows2.forEach((r)=>{
         if (r._group){
-          const text = `${r.division} — Total Today: ${r.total}`;
+          const text = `${r.division} — Total: ${r.total}`;
           const h = 18;
           ensureSpace(h);
           doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
@@ -1201,12 +1275,13 @@ class AdvancedPOSTracker {
       });
     }
 
+    // Footer: page numbers + date on every page
     const pages = doc.getNumberOfPages();
     for (let i=1; i<=pages; i++){
       doc.setPage(i);
       doc.setFont('helvetica','normal'); doc.setFontSize(9);
-      doc.text(`Generated on ${reportDateStr}`, pageW - margin, doc.internal.pageSize.getHeight() - 12, { align:'right' });
-      doc.text(`Page ${i} / ${pages}`, margin, doc.internal.pageSize.getHeight() - 12, { align:'left' });
+      doc.text(`Generated on ${reportDateStr}`, margin, pageH - 12, { align:'left' });
+      doc.text(`Page ${i} / ${pages}`, pageW - margin, pageH - 12, { align:'right' });
     }
 
     const stamp = new Date().toISOString().slice(0,10);
@@ -1222,7 +1297,7 @@ class AdvancedPOSTracker {
     doc.save(`${title.replace(/\s+/g,'-')}-${new Date().toISOString().slice(0,10)}.pdf`);
   }
 
-  // ---- CRUD / Import-Export / Backup (unchanged) ----
+  // ---- CRUD ----
   showLocationForm(){ this.currentLocationId=null; document.getElementById("modalTitle").textContent="Add New Location"; document.getElementById("locationForm").reset(); document.getElementById("locationModal").style.display="block"; }
   closeLocationModal(){ document.getElementById("locationModal").style.display="none"; }
   saveLocation(event){
@@ -1264,9 +1339,10 @@ class AdvancedPOSTracker {
     this.saveToStorage(); this.displayLocations(); this.updateDashboard(); alert("Post Office deleted successfully!");
   }
 
+  // ---- Excel import/export ----
   downloadTemplate(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEVOLOPED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
     const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Office','Contact Person','9876543210','9876543211','contact@postoffice.gov.in','Sample Address','Sample Location','Sample City','Sample State','123456',5,'EZETAP ANDROID X990','',0,'','Pending','Not Tested','None'];
     const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]); XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
   }
@@ -1306,7 +1382,7 @@ class AdvancedPOSTracker {
     const out=[];
     for (let i=1;i<data.length;i++){
       const r=data[i]; if (!r || !r.length) continue;
-      if (!r[1] || !r[2]) continue;
+      if (!r[1] || !r[2]) continue; // needs Division & PO Name
       out.push({
         id: this.nextLocationId++,
         slNo: out.length+1,
@@ -1363,61 +1439,6 @@ class AdvancedPOSTracker {
     if (!confirm("This action cannot be undone. Confirm again to proceed.")) return;
     this.locations=[]; this.nextLocationId=1; this.saveToStorage(); this.updateDashboard(); this.displayLocations();
     alert("All data cleared.");
-  }
-
-  /* ===== Reports page freeze + Print binding ===== */
-  _ensureReportsFreezeStyles(){
-    if (document.getElementById("reports-freeze-style")) return;
-    const css = `
-#reports.reports-frozen *:not(#reportsPrintBtn):not(#reportsPrintBtn *){
-  pointer-events: none !important;
-}
-#reports.reports-frozen{ user-select: none !important; }
-#reportsPrintBtn{ pointer-events: auto !important; }
-    `.trim();
-    const style = document.createElement("style");
-    style.id = "reports-freeze-style";
-    style.textContent = css;
-    document.head.appendChild(style);
-  }
-
-  _freezeReportsPage(enable=true){
-    const reports = document.getElementById("reports");
-    if (!reports) return;
-    this._ensureReportsFreezeStyles();
-    if (enable){
-      reports.classList.add("reports-frozen");
-      // Accessibility: remove tab focus from everything except print button
-      reports.querySelectorAll('button, a, input, select, textarea')
-        .forEach(el=>{
-          if (el.id === "reportsPrintBtn" || el.closest?.("#reportsPrintBtn")) return;
-          el.setAttribute("tabindex","-1");
-          el.setAttribute("aria-disabled","true");
-        });
-    } else {
-      reports.classList.remove("reports-frozen");
-      reports.querySelectorAll('[aria-disabled="true"]').forEach(el=>{
-        el.removeAttribute("aria-disabled");
-        if (el.getAttribute("tabindex")==="-1") el.removeAttribute("tabindex");
-      });
-    }
-  }
-
-  _bindReportsPrintButton(){
-    const btn = document.getElementById("reportsPrintBtn") || document.querySelector('[data-action="reports-print"]');
-    if (!btn || btn._boundReportsPrint) return;
-    btn._boundReportsPrint = true;
-    btn.addEventListener("click", (e)=>{
-      e.preventDefault();
-      e.stopPropagation();
-      try {
-        // Use the polished PDF exporter (includes fresh-page "Devices received today")
-        this.exportReportsPDF({});
-      } catch (err){
-        console.error("exportReportsPDF failed, falling back to browser print:", err);
-        try { window.print(); } catch (_) {}
-      }
-    }, { passive: false });
   }
 }
 

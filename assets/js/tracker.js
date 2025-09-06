@@ -9,6 +9,10 @@ class AdvancedPOSTracker {
     this.importData = [];
     this.users = ["KARNA", "NKR", "SKR", "BGR", "SBI_DOP"];
     this.storageKey = "advancedPOSTrackerData";
+    this.officeFilters = {};                         // per-column filters
+    this.docStorageKey = "advancedPOSTrackerDocs";   // localStorage for PDFs
+    this.uploadAllowedUsers = null;                  // null => everyone can upload; or set ["NKR","SBI_DOP"]
+
   }
 
   async init() {
@@ -85,7 +89,7 @@ class AdvancedPOSTracker {
     }
     switch (tabName) {
       case "dashboard": this.updateDashboard(); break;
-      case "locations": this.displayLocations(); this.updateFilters(); break;
+      case "locations": this.renderOfficeDetails(); break;
       case "progress": this.displayProgress(); this.updateProgressFilters(); break;
       case "reports": this.generateReports(); break;
       case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
@@ -431,6 +435,196 @@ class AdvancedPOSTracker {
     host.innerHTML = summaryHTML + divisionsHTML + issuesHTML;
   }
 
+  // ===== Office wise details (table view) =====
+renderOfficeDetails(){
+  const hostHead = document.getElementById("owd-thead");
+  const hostBody = document.getElementById("owd-tbody");
+  const meta     = document.getElementById("owd-meta");
+  const global   = document.getElementById("owd-global-search");
+  if (!hostHead || !hostBody) return;
+
+  const cols = this._owdColumns();
+  // Build header row
+  const headRow = `<tr class="header">${cols.map(c => `<th${c.align==='center'?' style="text-align:center"':''}>${c.label}</th>`).join("")}</tr>`;
+  // Build filter row
+  const filterRow = `<tr class="filters">${cols.map(c=>{
+    if (c.type === 'docs') return `<th></th>`;
+    return `<th><input class="owd-filter" data-col="${c.key}" placeholder="Filter ${c.label}" /></th>`;
+  }).join("")}</tr>`;
+  hostHead.innerHTML = headRow + filterRow;
+
+  // Render body with current filters
+  const { rows, dupSerials } = this._applyOfficeFilters(cols);
+  hostBody.innerHTML = rows.map(loc => {
+    return `<tr>${cols.map(c=>{
+      if (c.type === 'docs') {
+        const html = this._docCellHTML(loc);
+        return `<td style="text-align:center">${html}</td>`;
+      }
+      let val = (loc[c.key] ?? "");
+      // Normalise date display (keep as-is if already formatted)
+      if (c.key === 'dateOfReceiptOfDevice' && val) {
+        const d = new Date(val); if (!isNaN(d)) {
+          const dd = String(d.getDate()).padStart(2,'0');
+          const mm = String(d.getMonth()+1).padStart(2,'0');
+          const yy = d.getFullYear();
+          val = `${dd}/${mm}/${yy}`;
+        }
+      }
+      const emptyClass = (val === "" || val === null || typeof val === "undefined") ? " cell-empty" : "";
+      const dupClass = (c.key === "serialNo" && val && dupSerials.has(String(val).trim().toLowerCase())) ? " cell-dup" : "";
+      return `<td class="${emptyClass}${dupClass}"${c.align==='center'?' style="text-align:center"':''}>${this._escape(val)}</td>`;
+    }).join("")}</tr>`;
+  }).join("");
+
+  // Meta info (counts + duplicate serial summary)
+  const dupeCount = this._collectSerialDuplicates().size;
+  meta.textContent = `Rows: ${rows.length}  •  Duplicate Serial Nos: ${dupeCount}`;
+
+  // Wire up filters + global search
+  this._bindOfficeFilters(cols);
+  if (global && !global._owdBound){
+    global._owdBound = true;
+    global.addEventListener("input", () => this.renderOfficeDetails());
+  }
+
+  // Delegate upload change events
+  const table = document.getElementById("owd-table");
+  if (table && !table._owdBound){
+    table._owdBound = true;
+    table.addEventListener("change", (e)=>{
+      const inp = e.target;
+      if (inp?.matches('input[type="file"][data-doc-for]')){
+        const id = parseInt(inp.getAttribute("data-doc-for"),10);
+        const file = inp.files?.[0];
+        if (file) this._handleDocUpload(id, file);
+      }
+    });
+  }
+
+  // Natural auto-fit: table-layout:auto + nowrap headers
+  this._autoFitOfficeColumns?.();
+},
+
+// Column definitions (Excel/template + MID/TID + docs)
+_owdColumns(){
+  return [
+    { key:'slNo',                      label:'Sl.No.' },
+    { key:'division',                  label:'Division', align:'left' },
+    { key:'postOfficeName',            label:'POST OFFICE NAME', align:'left' },
+    { key:'postOfficeId',              label:'Post Office ID' },
+    { key:'officeType',                label:'Office Type' },
+    { key:'contactPersonName',         label:'NAME OF CONTACT PERSON AT THE LOCATION', align:'left' },
+    { key:'contactPersonNo',           label:'CONTACT PERSON NO.' },
+    { key:'altContactNo',              label:'ALT CONTACT PERSON NO.' },
+    { key:'contactEmail',              label:'CONTACT EMAIL ID', align:'left' },
+    { key:'locationAddress',           label:'LOCATION ADDRESS', align:'left' },
+    { key:'location',                  label:'LOCATION', align:'left' },
+    { key:'city',                      label:'CITY', align:'left' },
+    { key:'state',                     label:'STATE' },
+    { key:'pincode',                   label:'PINCODE' },
+    { key:'numberOfPosToBeDeployed',   label:'NUMBER OF POS TO BE DEPLOYED' },
+    { key:'typeOfPosTerminal',         label:'TYPE OF POS TERMINAL' },
+    { key:'dateOfReceiptOfDevice',     label:'Date of receipt of device' },
+    { key:'noOfDevicesReceived',       label:'No of devices received' },
+    { key:'serialNo',                  label:'Serial No' },
+    { key:'mid',                       label:'MID' },
+    { key:'tid',                       label:'TID' },
+    { key:'installationStatus',        label:'Installation status' },
+    { key:'functionalityStatus',       label:'Functionality / Working status of POS machines' },
+    { key:'issuesIfAny',               label:'Issues if any', align:'left' },
+    { key:'docs',                      label:'Documents', type:'docs' }
+  ];
+},
+
+_bindOfficeFilters(cols){
+  // read existing filters (global & per-col) from DOM each render
+  this.officeFilters = {};
+  document.querySelectorAll('#owd-thead .owd-filter').forEach(inp=>{
+    const k = inp.getAttribute('data-col'); this.officeFilters[k] = inp.value || "";
+    if (!inp._owdOnce){
+      inp._owdOnce = true;
+      inp.addEventListener("input", () => this.renderOfficeDetails());
+    }
+  });
+},
+
+_applyOfficeFilters(cols){
+  const global = (document.getElementById("owd-global-search")?.value || "").trim().toLowerCase();
+  const perCol = this.officeFilters || {};
+  // duplicate serial set for highlighting
+  const dupSerials = this._collectSerialDuplicates();
+
+  const rows = (this.locations || []).filter(loc=>{
+    // global search across all visible cols (except docs)
+    if (global){
+      const hay = cols.filter(c=>c.type!=='docs').map(c => (loc[c.key] ?? "")).join(" | ").toLowerCase();
+      if (!hay.includes(global)) return false;
+    }
+    // per-column contains match
+    for (const [k, v] of Object.entries(perCol)){
+      if (!v) continue;
+      const cell = (loc[k] ?? "").toString().toLowerCase();
+      if (!cell.includes(v.toLowerCase())) return false;
+    }
+    return true;
+  });
+  return { rows, dupSerials };
+},
+
+_collectSerialDuplicates(){
+  const count = new Map();
+  (this.locations || []).forEach(l=>{
+    const s = String(l.serialNo ?? "").trim().toLowerCase();
+    if (!s) return;
+    count.set(s, (count.get(s) || 0) + 1);
+  });
+  const dups = new Set(); count.forEach((n,k)=>{ if (n>1) dups.add(k); });
+  return dups;
+},
+
+_autoFitOfficeColumns(){
+  // Natural auto-fit achieved via CSS (table-layout:auto, nowrap headers, width:max-content).
+  // This hook exists for future tweaks; currently no JS needed.
+},
+
+// ---- Documents (PDF) storage & cell UI ----
+_docCellHTML(loc){
+  const id = loc.id;
+  const list = this._loadDocs()[id] || [];
+  const links = list.map((d, i) => `<a href="${d.dataUrl}" target="_blank" rel="noopener">View ${i+1}</a>`).join(" &nbsp; ");
+  const canUpload = Array.isArray(this.uploadAllowedUsers)
+      ? this.uploadAllowedUsers.includes(this.currentUser)
+      : true; // null => allow all
+  const uploadBtn = canUpload
+    ? `<label class="btn btn-sm btn-secondary" style="margin:0;cursor:pointer;">
+         Upload<input type="file" accept="application/pdf" data-doc-for="${id}" style="display:none;">
+       </label>`
+    : "";
+  return `<div class="doc-actions">${links || '<span style="opacity:.6">—</span>'}${uploadBtn ? '&nbsp;'+uploadBtn : ''}</div>`;
+},
+
+_handleDocUpload(id, file){
+  if (!file || file.type !== "application/pdf"){ alert("Please select a PDF file."); return; }
+  const fr = new FileReader();
+  fr.onload = () => {
+    const db = this._loadDocs();
+    (db[id] ||= []).push({ name:file.name, dataUrl: fr.result, ts: Date.now() });
+    localStorage.setItem(this.docStorageKey, JSON.stringify(db));
+    this.renderOfficeDetails();
+  };
+  fr.readAsDataURL(file);
+},
+
+_loadDocs(){
+  try{ return JSON.parse(localStorage.getItem(this.docStorageKey) || "{}"); }catch{ return {}; }
+},
+
+_escape(v){
+  return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+},
+
+  
   // ---- PDF ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }

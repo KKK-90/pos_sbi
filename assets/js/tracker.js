@@ -798,382 +798,408 @@ class AdvancedPOSTracker {
   }
 
   _escape(v){
-    return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+    return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
   }
 
   // ---- PDF + CRUD + Import/Export + Backup (all frozen below) ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
+
+  // ---- Reports PDF (ONLY function modified per latest request) ----
   exportReportsPDF(opts){
-  if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
-  const { jsPDF } = window.jspdf;
+    if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
+    const { jsPDF } = window.jspdf;
 
-  // Orientation chooser (radio buttons)
-  if (!opts || !opts.orientation){
-    const id = "pdf-orient-overlay";
-    if (document.getElementById(id)) return; // already open
-    const overlay = document.createElement("div");
-    overlay.id = id;
-    overlay.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
-        <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:20px 22px;width:340px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
-          <h3 style="margin:0 0 8px;font-size:16px;color:#2c3e50;">Export Reports PDF</h3>
-          <p style="margin:0 0 12px;font-size:13px;color:#34495e;">Choose orientation:</p>
-          <div style="display:flex;gap:12px;margin:0 0 16px;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-              <input type="radio" name="pdf-orient" value="portrait"> Portrait
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-              <input type="radio" name="pdf-orient" value="landscape" checked> Landscape
-            </label>
+    // Orientation chooser
+    if (!opts || !opts.orientation){
+      const id = "pdf-orient-overlay";
+      if (document.getElementById(id)) return;
+      const overlay = document.createElement("div");
+      overlay.id = id;
+      overlay.innerHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
+          <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:20px 22px;width:340px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+            <h3 style="margin:0 0 8px;font-size:16px;color:#2c3e50;">Export Reports PDF</h3>
+            <p style="margin:0 0 12px;font-size:13px;color:#34495e;">Choose orientation:</p>
+            <div style="display:flex;gap:12px;margin:0 0 16px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input type="radio" name="pdf-orient" value="portrait"> Portrait
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input type="radio" name="pdf-orient" value="landscape" checked> Landscape
+              </label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;">
+              <button id="pdf-orient-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
+              <button id="pdf-orient-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Generate</button>
+            </div>
           </div>
-          <div style="display:flex;justify-content:flex-end;gap:10px;">
-            <button id="pdf-orient-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
-            <button id="pdf-orient-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Generate</button>
-          </div>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    overlay.querySelector("#pdf-orient-cancel").onclick = ()=> overlay.remove();
-    overlay.querySelector("#pdf-orient-generate").onclick = ()=>{
-      const sel = overlay.querySelector('input[name="pdf-orient"]:checked')?.value || "landscape";
-      overlay.remove();
-      this.exportReportsPDF({ orientation: sel });
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector("#pdf-orient-cancel").onclick = ()=> overlay.remove();
+      overlay.querySelector("#pdf-orient-generate").onclick = ()=>{
+        const sel = overlay.querySelector('input[name="pdf-orient"]:checked')?.value || "landscape";
+        overlay.remove();
+        this.exportReportsPDF({ orientation: sel });
+      };
+      return;
+    }
+
+    // Helpers / formatting
+    const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
+    const formatDMY = (d)=> {
+      const dd = String(d.getDate()).padStart(2,"0");
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
     };
-    return;
-  }
-
-  // Setup / helpers
-  const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
-  const formatDMY = (d)=> {
-    const dd = String(d.getDate()).padStart(2,"0");
-    const mm = String(d.getMonth()+1).padStart(2,"0");
-    const yyyy = d.getFullYear();
-    return `${dd}/${mm}/${yyyy}`;
-  };
-  const toInt = v => parseInt(v) || 0;
-  const normalizeToDMY = (val)=>{
-    if (!val) return null;
-    const t = String(val).trim();
-    let dd, mm, yyyy;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(t)){ [yyyy,mm,dd] = t.split("-"); }
-    else if (/^\d{2}\/\d{2}\/\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("/"); }
-    else if (/^\d{2}-\d{2}-\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("-"); }
-    else { const d=new Date(t); return isNaN(d)? null: formatDMY(d); }
-    return `${dd.padStart(2,"0")}/${mm.padStart(2,"0")}/${yyyy}`;
-  };
-
-  const rows = this.locations || [];
-  const today = new Date();
-  const reportDateStr = formatDMY(today);
-
-  // Aggregates
-  const totalOffices = rows.length;
-  const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
-  const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
-  const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
-  const devicesReceivedToday = rows.reduce((s,l)=> {
-    return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
-  }, 0);
-
-  // Group by division
-  const byDiv = {};
-  rows.forEach(r=>{
-    const d = r.division || "—";
-    (byDiv[d] ||= []).push(r);
-  });
-
-  // Division entries: alphabetical except "RMS HB Division" last
-  const entries = Object.entries(byDiv).sort(([a],[b])=>{
-    if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
-    if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
-    return a.localeCompare(b);
-  });
-
-  // Rows for table
-  const divisions = entries.map(([division, arr])=>{
-    const offices = arr.length;
-    const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
-    const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
-    const pend = Math.max(0, req - rec);
-    const inst = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
-    const pinst = Math.max(0, rec - inst);
-    const iss = arr.filter(x => {
-      const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
-      return t && t !== "none";
-    }).length;
-    const comp = inst;
-    const pct = req ? Math.round((inst/req)*100) : 0;
-    return { division, offices, req, rec, pend, inst, pinst, iss, comp, pct };
-  });
-
-  const totalsRow = {
-    division: "Total",
-    offices: totalOffices,
-    req: totalDevicesRequired,
-    rec: totalDevicesReceived,
-    pend: Math.max(0, totalDevicesRequired - totalDevicesReceived),
-    inst: devicesInstalledRegion,
-    pinst: Math.max(0, totalDevicesReceived - devicesInstalledRegion),
-    iss: rows.filter(x => {
-      const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
-      return t && t !== "none";
-    }).length,
-    comp: devicesInstalledRegion,
-    pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
-  };
-
-  // PDF doc
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 32;
-  let y = margin;
-
-  // Colors / fonts
-  const headerFill = { r: 246, g: 248, b: 252 };  // light, professional
-  const stripeFill = { r: 252, g: 253, b: 255 };  // subtle zebra
-  const borderGray = 180;
-  const brandBlue = { r: 52, g: 152, b: 219 };
-
-  const fontTitle = 15;
-  const fontSub   = 11;
-  const fontHead  = 9.5;   // compact for single-page fit
-  const fontBody  = 9;
-  const lineH     = 11;
-  const padX      = 6;
-
-  // Table columns (labels + alignment)
-  const tableCols = [
-    { key:'division', label:'Division', align:'left'  },
-    { key:'offices',  label:'Offices', align:'center'},
-    { key:'req',      label:'Devices Required', align:'center'},
-    { key:'rec',      label:'Devices Received', align:'center'},
-    { key:'pend',     label:'Pending', align:'center'},
-    { key:'inst',     label:'Devices Installed', align:'center'},
-    { key:'pinst',    label:'Pending Installation', align:'center'},
-    { key:'iss',      label:'Issues', align:'center'},
-    { key:'comp',     label:'Completed', align:'center'},
-    { key:'pct',      label:'Completion %', align:'center'},
-  ];
-  const tableX = margin;
-  const tableW = pageW - margin*2;
-
-  // --- Auto-fit column widths (measure header + content) ---
-  function computeAutoWidths(){
-    // min widths (pt)
-    const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
-
-    // measure header width at header font
-    doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-    const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
-
-    // measure content width at body font (consider divisions, numbers, totals row)
-    doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-    const contentW = tableCols.map(() => 0);
-
-    const consider = obj => {
-      tableCols.forEach((c, i) => {
-        const v = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
-        const w = Math.ceil(doc.getTextWidth(v) + padX*2 + 2);
-        if (w > contentW[i]) contentW[i] = w;
-      });
+    const toInt = v => parseInt(v) || 0;
+    const normalizeToDMY = (val)=>{
+      if (!val) return null;
+      const t = String(val).trim();
+      let dd, mm, yyyy;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(t)){ [yyyy,mm,dd] = t.split("-"); }
+      else if (/^\d{2}\/\d{2}\/\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("/"); }
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("-"); }
+      else { const d=new Date(t); return isNaN(d)? null: formatDMY(d); }
+      return `${dd.padStart(2,"0")}/${mm.padStart(2,"0")}/${yyyy}`;
     };
-    divisions.forEach(consider);
-    consider(totalsRow);
 
-    // desired width = max(header, content, min)
-    let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
-    let sumDesired = desired.reduce((a,b)=>a+b,0);
+    const rows = this.locations || [];
+    const today = new Date();
+    const reportDateStr = formatDMY(today);
 
-    // scale down if over
-    if (sumDesired > tableW){
-      const scale = tableW / sumDesired;
-      desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
-      let sum = desired.reduce((a,b)=>a+b,0);
-      // if still over (due to min constraints), shave from widest slack columns
-      let tries = 0;
-      while (sum > tableW && tries < 200){
-        // find column with most slack over min
-        let idx = -1, slackMax = -1;
-        for (let i=0;i<desired.length;i++){
-          const slack = desired[i] - minW[i];
-          if (slack > slackMax){ slackMax = slack; idx = i; }
+    // Aggregates
+    const totalOffices = rows.length;
+    const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
+    const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
+    const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+    const devicesReceivedToday = rows.reduce((s,l)=> {
+      return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
+    }, 0);
+
+    // Group by division
+    const byDiv = {};
+    rows.forEach(r=>{
+      const d = r.division || "—";
+      (byDiv[d] ||= []).push(r);
+    });
+
+    // Sort divisions (RMS HB Division last)
+    const entries = Object.entries(byDiv).sort(([a],[b])=>{
+      if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
+      if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
+      return a.localeCompare(b);
+    });
+
+    // Division-wise summary rows
+    const divisions = entries.map(([division, arr])=>{
+      const offices = arr.length;
+      const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
+      const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
+      const pend = Math.max(0, req - rec);
+      const inst = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+      const pinst = Math.max(0, rec - inst);
+      const iss = arr.filter(x => {
+        const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
+        return t && t !== "none";
+      }).length;
+      const comp = inst;
+      const pct = req ? Math.round((inst/req)*100) : 0;
+      return { division, offices, req, rec, pend, inst, pinst, iss, comp, pct };
+    });
+
+    const totalsRow = {
+      division: "Total",
+      offices: totalOffices,
+      req: totalDevicesRequired,
+      rec: totalDevicesReceived,
+      pend: Math.max(0, totalDevicesRequired - totalDevicesReceived),
+      inst: devicesInstalledRegion,
+      pinst: Math.max(0, totalDevicesReceived - devicesInstalledRegion),
+      iss: rows.filter(x => {
+        const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
+        return t && t !== "none";
+      }).length,
+      comp: devicesInstalledRegion,
+      pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
+    };
+
+    // PDF doc + layout
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 32;
+    let y = margin;
+
+    // Colors / fonts (HEADER DARKENED)
+    const headerFill = { r: 232, g: 237, b: 245 };  // slightly darker
+    const stripeFill = { r: 252, g: 253, b: 255 };
+    const borderGray = 180;
+    const brandBlue = { r: 52, g: 152, b: 219 };
+
+    const fontTitle = 15;
+    const fontSub   = 11;
+    const fontHead  = 9.5;
+    const fontBody  = 9;
+    const lineH     = 11;
+    const padX      = 6;
+
+    // Table columns
+    const tableCols = [
+      { key:'division', label:'Division', align:'left'  },
+      { key:'offices',  label:'Offices', align:'center'},
+      { key:'req',      label:'Devices Required', align:'center'},
+      { key:'rec',      label:'Devices Received', align:'center'},
+      { key:'pend',     label:'Pending', align:'center'},
+      { key:'inst',     label:'Devices Installed', align:'center'},
+      { key:'pinst',    label:'Pending Installation', align:'center'},
+      { key:'iss',      label:'Issues', align:'center'},
+      { key:'comp',     label:'Completed', align:'center'},
+      { key:'pct',      label:'Completion %', align:'center'},
+    ];
+    const tableX = margin;
+    const tableW = pageW - margin*2;
+
+    // Auto-fit widths
+    function computeAutoWidths(){
+      const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+      const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+      const contentW = tableCols.map(() => 0);
+      const consider = obj => {
+        tableCols.forEach((c, i) => {
+          const v = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
+          const w = Math.ceil(doc.getTextWidth(v) + padX*2 + 2);
+          if (w > contentW[i]) contentW[i] = w;
+        });
+      };
+      divisions.forEach(consider); consider(totalsRow);
+      let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
+      let sumDesired = desired.reduce((a,b)=>a+b,0);
+      if (sumDesired > tableW){
+        const scale = tableW / sumDesired;
+        desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
+        let sum = desired.reduce((a,b)=>a+b,0);
+        let tries = 0;
+        while (sum > tableW && tries < 200){
+          let idx = -1, slackMax = -1;
+          for (let i=0;i<desired.length;i++){
+            const slack = desired[i] - minW[i];
+            if (slack > slackMax){ slackMax = slack; idx = i; }
+          }
+          if (idx < 0) break;
+          desired[idx] -= 1; sum -= 1; tries++;
         }
-        if (idx < 0) break;
-        desired[idx] -= 1;
-        sum -= 1;
-        tries++;
-      }
-    } else if (sumDesired < tableW){
-      // distribute leftover (bias to Division and longer-text columns)
-      let leftover = tableW - sumDesired;
-      const priorityKeys = ['division','pinst','req','rec','inst'];
-      while (leftover > 0){
-        let advanced = false;
-        for (let i=0;i<tableCols.length && leftover>0;i++){
-          if (priorityKeys.includes(tableCols[i].key)){
-            desired[i] += 1; leftover -= 1; advanced = true;
+      } else if (sumDesired < tableW){
+        let leftover = tableW - sumDesired;
+        const priorityKeys = ['division','pinst','req','rec','inst'];
+        while (leftover > 0){
+          let advanced = false;
+          for (let i=0;i<tableCols.length && leftover>0;i++){
+            if (priorityKeys.includes(tableCols[i].key)){
+              desired[i] += 1; leftover -= 1; advanced = true;
+            }
+          }
+          if (!advanced){
+            for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i]+=1; leftover-=1; }
           }
         }
-        if (!advanced){
-          for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i]+=1; leftover-=1; }
-        }
       }
+      tableCols.forEach((c,i)=> c.w = desired[i]);
     }
 
-    // assign to columns
-    tableCols.forEach((c,i)=> c.w = desired[i]);
-  }
-
-  // helpers
-  function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
-  function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
-  function newPage(){ doc.addPage(); y = margin; drawHeader(); }
-  function centerBlockY(rowTop, rowH, lines){
-    const contentH = Math.max(lineH, lines.length * lineH);
-    return rowTop + (rowH - contentH)/2 + lineH*0.85;
-  }
-
-  // Header
-  function drawHeader(){
-    doc.setFont('helvetica','bold'); doc.setFontSize(fontTitle);
-    doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
-    doc.text('North Karnataka Region', margin, y); y += 18;
-
-    doc.setTextColor(0,0,0);
-    doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
-    doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
-    doc.text(`Report for the date: ${reportDateStr}`, margin, y); y += 8;
-
-    setBorder(); doc.line(margin, y, pageW - margin, y); y += 16;
-  }
-  drawHeader();
-
-  // Region Summary (two columns) — uses "Devices received today"
-  doc.setFont('helvetica','bold'); doc.setFontSize(12);
-  doc.text('Region Summary', margin, y); y += 12;
-
-  doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
-  const rsLeft = [
-    ['Total Offices', String(totalOffices)],
-    ['Total Devices required', String(totalDevicesRequired)]
-  ];
-  const rsRight = [
-    ['Total Devices received', String(totalDevicesReceived)],
-    ['Devices received today', String(devicesReceivedToday)]
-  ];
-  const colGap = 260; // right column group start
-  const valOffset = 190; // value alignment width
-
-  rsLeft.forEach(([k,v],i)=>{
-    ensureSpace(14);
-    doc.text(`${k}:`, margin, y);
-    doc.text(v, margin + valOffset, y, { align:'right' });
-    const pair = rsRight[i];
-    if (pair){
-      doc.text(`${pair[0]}:`, margin + colGap, y);
-      doc.text(pair[1], margin + colGap + valOffset, y, { align:'right' });
+    // helpers
+    function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
+    function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
+    function newPage(){ doc.addPage(); y = margin; drawHeader(); }
+    function centerBlockY(rowTop, rowH, lines){
+      const contentH = Math.max(lineH, lines.length * lineH);
+      return rowTop + (rowH - contentH)/2 + lineH*0.85;
     }
-    y += 14;
-  });
-  y += 6;
 
-  // compute auto widths now that we know rows
-  computeAutoWidths();
+    // Header
+    function drawHeader(){
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontTitle);
+      doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
+      doc.text('North Karnataka Region', margin, y); y += 18;
 
-  // Table header (uniform background across the whole header row)
-  function drawTableHeader(){
-    ensureSpace(24);
-    setBorder();
-    // compute header height from wrapped labels
-    doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-    const headerHeights = tableCols.map(c => {
-      const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-      return Math.max(18, lines.length * lineH + 6);
-    });
-    const headerH = Math.max(...headerHeights);
+      doc.setTextColor(0,0,0);
+      doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
+      doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
+      doc.text(`Report for the date: ${reportDateStr}`, margin, y); y += 8;
 
-    // Single full-width background
-    doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
-    const totalW = tableCols.reduce((s,c)=>s+c.w,0);
-    doc.rect(tableX, y, totalW, headerH, 'F');
+      setBorder(); doc.line(margin, y, pageW - margin, y); y += 16;
+    }
+    drawHeader();
 
-    // Per-cell borders + text
-    let x = tableX;
-    tableCols.forEach(c=>{
-      doc.rect(x, y, c.w, headerH, 'S');
-      const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-      const startY = centerBlockY(y, headerH, lines);
-      if (c.align === 'left'){
-        doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
-      } else {
-        lines.forEach((ln,i)=> doc.text(ln, x + c.w/2, startY + i*lineH, { align:'center' }));
+    // Region Summary
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('Region Summary', margin, y); y += 12;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
+    const rsLeft = [
+      ['Total Offices', String(totalOffices)],
+      ['Total Devices required', String(totalDevicesRequired)]
+    ];
+    const rsRight = [
+      ['Total Devices received', String(totalDevicesReceived)],
+      ['Devices received today', String(devicesReceivedToday)]
+    ];
+    const colGap = 260, valOffset = 190;
+    rsLeft.forEach(([k,v],i)=>{
+      ensureSpace(14);
+      doc.text(`${k}:`, margin, y);
+      doc.text(v, margin + valOffset, y, { align:'right' });
+      const pair = rsRight[i];
+      if (pair){
+        doc.text(`${pair[0]}:`, margin + colGap, y);
+        doc.text(pair[1], margin + colGap + valOffset, y, { align:'right' });
       }
-      x += c.w;
+      y += 14;
     });
+    y += 6;
 
-    y += headerH;
-  }
+    // compute widths
+    computeAutoWidths();
 
-  // Table row
-  function drawRow(obj, stripe=false, bold=false){
-    doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
-    const cells = tableCols.map(col=>{
-      const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
-      const lines = doc.splitTextToSize(raw, col.w - padX*2);
-      const h = Math.max(16, lines.length * lineH + 6);
-      return { col, lines, h };
-    });
-    const rowH = Math.max(...cells.map(c => c.h));
-    ensureSpace(rowH);
+    // Table header
+    function drawTableHeader(){
+      ensureSpace(24);
+      setBorder();
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+      const headerHeights = tableCols.map(c => {
+        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+        return Math.max(18, lines.length * lineH + 6);
+      });
+      const headerH = Math.max(...headerHeights);
 
-    if (stripe){
-      doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
+      doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
-      doc.rect(tableX, y, totalW, rowH, 'F');
+      doc.rect(tableX, y, totalW, headerH, 'F');
+
+      let x = tableX;
+      tableCols.forEach(c=>{
+        doc.rect(x, y, c.w, headerH, 'S');
+        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+        const startY = centerBlockY(y, headerH, lines);
+        if (c.align === 'left'){
+          doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
+        } else {
+          lines.forEach((ln,i)=> doc.text(ln, x + c.w/2, startY + i*lineH, { align:'center' }));
+        }
+        x += c.w;
+      });
+      y += headerH;
     }
-    setBorder();
-    let x = tableX;
-    cells.forEach(({col,lines})=>{
-      doc.rect(x, y, col.w, rowH, 'S');
-      const startY = centerBlockY(y, rowH, lines);
-      if (col.align === 'left'){
-        doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
-      } else {
-        lines.forEach((ln,i)=> doc.text(ln, x + col.w/2, startY + i*lineH, { align:'center' }));
+
+    // Row drawer (supports header-style BG for Total row)
+    function drawRow(obj, opts={}){
+      const { stripe=false, bold=false, headerBg=false } = opts;
+      doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
+
+      const cells = tableCols.map(col=>{
+        const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
+        const lines = doc.splitTextToSize(raw, col.w - padX*2);
+        const h = Math.max(16, lines.length * lineH + 6);
+        return { col, lines, h };
+      });
+      const rowH = Math.max(...cells.map(c => c.h));
+      ensureSpace(rowH);
+
+      if (stripe){
+        doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
+        const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+        doc.rect(tableX, y, totalW, rowH, 'F');
       }
-      x += col.w;
+      if (headerBg){
+        doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
+        const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+        doc.rect(tableX, y, totalW, rowH, 'F');
+      }
+
+      setBorder();
+      let x = tableX;
+      cells.forEach(({col,lines})=>{
+        doc.rect(x, y, col.w, rowH, 'S');
+        const startY = centerBlockY(y, rowH, lines);
+        if (col.align === 'left'){
+          doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
+        } else {
+          lines.forEach((ln,i)=> doc.text(ln, x + col.w/2, startY + i*lineH, { align:'center' }));
+        }
+        x += col.w;
+      });
+      y += rowH;
+    }
+
+    // Render Division-wise table
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('Division-wise Detailed Report', margin, y); y += 8;
+    drawTableHeader();
+    divisions.forEach((r, idx) => {
+      if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
+      drawRow(r, { stripe: idx % 2 === 1 });
     });
-    y += rowH;
-  }
-
-  // Render table
-  doc.setFont('helvetica','bold'); doc.setFontSize(12);
-  doc.text('Division-wise Detailed Report', margin, y); y += 8;
-  drawTableHeader();
-
-  divisions.forEach((r, idx) => {
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
-    drawRow(r, idx % 2 === 1);
-  });
-  // Totals row
-  if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
-  drawRow(totalsRow, false, true);
+    // Totals row with header-like background + bold
+    drawRow(totalsRow, { headerBg: true, bold: true });
 
-  // Footer: page numbers + date on every page
-  const pages = doc.getNumberOfPages();
-  for (let i=1; i<=pages; i++){
-    doc.setPage(i);
-    doc.setFont('helvetica','normal'); doc.setFontSize(9);
-    doc.text(`Generated on ${reportDateStr}`, pageW - margin, pageH - 12, { align:'right' });
-    doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'left' });
+    // NEW: Devices received today — details (Division-wise)
+    const todayList = rows
+      .filter(l => normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr && toInt(l.noOfDevicesReceived) > 0);
+
+    if (todayList.length){
+      y += 10;
+      doc.setFont('helvetica','bold'); doc.setFontSize(12);
+      doc.text('Devices received today — Details (Division-wise)', margin, y); y += 8;
+
+      const byDivToday = {};
+      todayList.forEach(l=>{
+        const d = l.division || '—';
+        (byDivToday[d] ||= []).push(l);
+      });
+
+      doc.setFont('helvetica','normal'); doc.setFontSize(9);
+      const maxWidth = pageW - margin*2;
+      const bullet = '• ';
+
+      const divNames = Object.keys(byDivToday).sort((a,b)=>{
+        if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
+        if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
+        return a.localeCompare(b);
+      });
+
+      divNames.forEach((dName, di)=>{
+        const offices = byDivToday[dName];
+        ensureSpace(14);
+        doc.setFont('helvetica','bold'); doc.text(dName, margin, y); y += 12;
+        doc.setFont('helvetica','normal');
+
+        offices.forEach(o=>{
+          const line = `${bullet}${o.postOfficeName || ''} — ${toInt(o.noOfDevicesReceived)}`;
+          const lines = doc.splitTextToSize(line, maxWidth);
+          ensureSpace(lines.length * lineH);
+          lines.forEach((ln, i)=> doc.text(ln, margin + 10, y + i*lineH));
+          y += lines.length * lineH;
+        });
+
+        if (di < divNames.length-1) { y += 6; }
+      });
+    }
+
+    // Footer
+    const pages = doc.getNumberOfPages();
+    for (let i=1; i<=pages; i++){
+      doc.setPage(i);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9);
+      doc.text(`Generated on ${reportDateStr}`, pageW - margin, pageH - 12, { align:'right' });
+      doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'left' });
+    }
+
+    const stamp = new Date().toISOString().slice(0,10);
+    doc.save(`NKR_POS_Deployment_Report_${stamp}.pdf`);
   }
-
-  const stamp = new Date().toISOString().slice(0,10);
-  doc.save(`NKR_POS_Deployment_Report_${stamp}.pdf`);
-}
-
 
   _pdfSimple(title){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }

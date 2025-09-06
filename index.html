@@ -91,24 +91,26 @@
       </div>
 
       <!-- Locations -->
-      <div id="locations" class="tab-content">
-        <div class="section-header">
-          <h2 class="section-title">All Offices</h2>
-          <button class="btn btn-primary rbac" data-minrole="admin" onclick="showLocationForm()">Add Post Office</button>
-        </div>
-        <div class="filters">
-          <input type="text" class="filter-input" id="searchInput" placeholder="🔍 Search Offices..." onkeyup="filterLocations()" />
-          <select class="filter-select" id="divisionFilter" onchange="filterLocations()"><option value="">All Divisions</option></select>
-          <select class="filter-select" id="statusFilter" onchange="filterLocations()">
-            <option value="">All Status</option><option value="Pending">Pending</option>
-            <option value="Device Received">Device Received</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Completed">Completed</option>
-            <option value="Failed">Failed</option>
-          </select>
-        </div>
-        <div id="locationsList"></div>
-      </div>
+      <!-- Office wise details (table view) -->
+<div id="locations" class="tab-content">
+  <div class="section-header">
+    <h2 class="section-title">Office wise details</h2>
+    <div class="flex gap-15">
+      <input type="text" class="filter-input" id="owd-global-search" placeholder="🔍 Search anywhere..." />
+    </div>
+  </div>
+
+  <div id="officeDetailsHost" class="card" style="padding:0;">
+    <div class="table-scroll">
+      <table id="owd-table" class="data-table owd-table">
+        <thead id="owd-thead"></thead>
+        <tbody id="owd-tbody"></tbody>
+      </table>
+    </div>
+    <div id="owd-meta" style="padding:12px 16px;"></div>
+  </div>
+</div>
+
 
       <!-- Progress -->
       <div id="progress" class="tab-content">

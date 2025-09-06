@@ -10,10 +10,10 @@ class AdvancedPOSTracker {
     this.users = ["KARNA", "NKR", "SKR", "BGR", "SBI_DOP"];
     this.storageKey = "advancedPOSTrackerData";
 
-    // ===== Office wise details (scoped additions only) =====
-    this.officeFilters = {};                         // per-column filters
-    this.docStorageKey = "advancedPOSTrackerDocs";   // localStorage for PDFs
-    this.uploadAllowedUsers = null;                  // null => everyone can upload; or set ["NKR","SBI_DOP"]
+    // --- Office wise details state ---
+    this.officeFilters = {};                         // per-column filters (key -> value)
+    this.docStorageKey = "advancedPOSTrackerDocs";   // localStorage key for PDF blobs
+    this.uploadAllowedUsers = null;                  // null => everyone; or restrict e.g. ["NKR","SBI_DOP"]
   }
 
   async init() {
@@ -90,7 +90,7 @@ class AdvancedPOSTracker {
     }
     switch (tabName) {
       case "dashboard": this.updateDashboard(); break;
-      case "locations": this.renderOfficeDetails(); break; // (Only this tab changed)
+      case "locations": this.renderOfficeDetails(); break;   // Office wise details table
       case "progress": this.displayProgress(); this.updateProgressFilters(); break;
       case "reports": this.generateReports(); break;
       case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
@@ -185,12 +185,11 @@ class AdvancedPOSTracker {
     document.getElementById("recentActivity").innerHTML = html;
   }
 
-  // ---- filters / lists (legacy cards, kept for other tabs) ----
+  // ---- filters / legacy lists (kept for other tabs / frozen areas) ----
   filterByDivision(name){ this.showTab(null,"progress"); const sel=document.getElementById("progressDivisionFilter"); if (sel){ sel.value=name; this.filterProgressByDivision(); } }
   displayLocations(){ this.renderLocationsList(this.locations, "locationsList"); }
   renderLocationsList(list, targetId="locationsList"){
     const target = document.getElementById(targetId);
-    if (!target) return; // guard if that container is not present (OWD uses table now)
     if (!list.length) {
       target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
         <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
@@ -233,9 +232,9 @@ class AdvancedPOSTracker {
     if (sel){ sel.innerHTML=`<option value="">All Divisions</option>`; divisions.forEach(d=> sel.innerHTML+=`<option value="${d}">${d}</option>`); }
   }
   filterLocations(){
-    const term=(document.getElementById("searchInput")?.value||"").toLowerCase();
-    const div=document.getElementById("divisionFilter")?.value;
-    const status=document.getElementById("statusFilter")?.value;
+    const term=(document.getElementById("searchInput").value||"").toLowerCase();
+    const div=document.getElementById("divisionFilter").value;
+    const status=document.getElementById("statusFilter").value;
     const filtered=this.locations.filter(l=>{
       const matchesSearch = [l.postOfficeName,l.division,l.city].some(v=> (v||"").toLowerCase().includes(term));
       const matchesDivision = !div || l.division===div;
@@ -270,7 +269,7 @@ class AdvancedPOSTracker {
     this.renderLocationsList(filtered,"progressList");
   }
 
-  // ---- reports (frozen) ----
+  // ---- reports ----
   generateReports(){
     const host = document.getElementById("reportsContent");
     if (!host) return;
@@ -310,7 +309,7 @@ class AdvancedPOSTracker {
       return s && s.toLowerCase() !== "none";
     };
 
-    // alphabetical, but "RMS HB Division" always last (frozen rule)
+    // custom sort: alphabetical, but "RMS HB Division" always last
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
@@ -371,7 +370,6 @@ class AdvancedPOSTracker {
       </tr>
     `;
 
-    // Compose HTML
     const divisionsHTML = `
       <div class="section-header" style="margin-top:20px;">
         <h3 class="section-title">Division-wise Detailed Report</h3>
@@ -447,51 +445,69 @@ class AdvancedPOSTracker {
     if (!hostHead || !hostBody) return;
 
     const cols = this._owdColumns();
+
     // Build header row
-    const headRow = `<tr class="header">${cols.map(c => `<th${c.align==='center'?' style="text-align:center"':''}>${c.label}</th>`).join("")}</tr>`;
-    // Build filter row
+    const headRow = `<tr class="header">${cols.map(c =>
+      `<th${c.align==='center'?' style="text-align:center"':''}>${c.label}</th>`
+    ).join("")}</tr>`;
+
+    // Build inline filter row
     const filterRow = `<tr class="filters">${cols.map(c=>{
       if (c.type === 'docs') return `<th></th>`;
-      return `<th><input class="owd-filter" data-col="${c.key}" placeholder="Filter ${c.label}" /></th>`;
+      return `<th><input class="owd-filter" data-col="${c.key}" placeholder="Filter ${c.label}"></th>`;
     }).join("")}</tr>`;
+
     hostHead.innerHTML = headRow + filterRow;
 
-    // Render body with current filters
-    const { rows, dupSerials } = this._applyOfficeFilters(cols);
+    // Bind filters BEFORE applying them (prevents empty-body on first render)
+    this._bindOfficeFilters(cols);
+
+    // Apply filters
+    let { rows, dupSerials } = this._applyOfficeFilters(cols);
+
+    // Safety: if first paint somehow filtered out everything, show all data
+    if (!rows.length && (this.locations || []).length) rows = this.locations;
+
+    // Render table body
     hostBody.innerHTML = rows.map(loc => {
       return `<tr>${cols.map(c=>{
         if (c.type === 'docs') {
-          const html = this._docCellHTML(loc);
-          return `<td style="text-align:center">${html}</td>`;
+          return `<td style="text-align:center">${this._docCellHTML(loc)}</td>`;
         }
         let val = (loc[c.key] ?? "");
-        // Normalise date display
+
+        // Normalise date for receipt field
         if (c.key === 'dateOfReceiptOfDevice' && val) {
-          const d = new Date(val); if (!isNaN(d)) {
+          const d = new Date(val);
+          if (!isNaN(d)) {
             const dd = String(d.getDate()).padStart(2,'0');
             const mm = String(d.getMonth()+1).padStart(2,'0');
             const yy = d.getFullYear();
             val = `${dd}/${mm}/${yy}`;
           }
         }
-        const emptyClass = (val === "" || val === null || typeof val === "undefined") ? " cell-empty" : "";
-        const dupClass = (c.key === "serialNo" && val && dupSerials.has(String(val).trim().toLowerCase())) ? " cell-dup" : "";
-        return `<td class="${emptyClass}${dupClass}"${c.align==='center'?' style="text-align:center"':''}>${this._escape(val)}</td>`;
+
+        const isBlank = (val === "" || val === null || typeof val === "undefined");
+        const emptyClass = isBlank ? " cell-empty" : "";
+        const dupClass = (c.key === "serialNo" && !isBlank &&
+                          dupSerials.has(String(val).trim().toLowerCase())) ? " cell-dup" : "";
+        const align = c.align==='center' ? ' style="text-align:center"' : '';
+        return `<td class="${emptyClass}${dupClass}"${align}>${this._escape(val)}</td>`;
       }).join("")}</tr>`;
     }).join("");
 
-    // Meta info (counts + duplicate serial summary)
+    // Meta / counts
     const dupeCount = this._collectSerialDuplicates().size;
-    if (meta) meta.textContent = `Rows: ${rows.length}  •  Duplicate Serial Nos: ${dupeCount}`;
+    const total = (this.locations || []).length;
+    if (meta) meta.textContent = `Rows: ${rows.length} of ${total} • Duplicate Serial Nos: ${dupeCount}`;
 
-    // Wire up filters + global search
-    this._bindOfficeFilters(cols);
+    // Global search input (bind once)
     if (global && !global._owdBound){
       global._owdBound = true;
       global.addEventListener("input", () => this.renderOfficeDetails());
     }
 
-    // Delegate upload change events
+    // Delegate upload change events (bind once)
     const table = document.getElementById("owd-table");
     if (table && !table._owdBound){
       table._owdBound = true;
@@ -505,7 +521,7 @@ class AdvancedPOSTracker {
       });
     }
 
-    // Natural auto-fit: table-layout:auto + nowrap headers
+    // Natural auto-fit via CSS hook (kept for extensibility)
     this._autoFitOfficeColumns?.();
   }
 
@@ -541,9 +557,11 @@ class AdvancedPOSTracker {
   }
 
   _bindOfficeFilters(cols){
+    // capture current values and attach listeners (once)
     this.officeFilters = {};
     document.querySelectorAll('#owd-thead .owd-filter').forEach(inp=>{
-      const k = inp.getAttribute('data-col'); this.officeFilters[k] = inp.value || "";
+      const k = inp.getAttribute('data-col');
+      this.officeFilters[k] = inp.value || "";
       if (!inp._owdOnce){
         inp._owdOnce = true;
         inp.addEventListener("input", () => this.renderOfficeDetails());
@@ -557,10 +575,12 @@ class AdvancedPOSTracker {
     const dupSerials = this._collectSerialDuplicates();
 
     const rows = (this.locations || []).filter(loc=>{
+      // global search across all visible cols (except docs)
       if (global){
         const hay = cols.filter(c=>c.type!=='docs').map(c => (loc[c.key] ?? "")).join(" | ").toLowerCase();
         if (!hay.includes(global)) return false;
       }
+      // per-column contains match
       for (const [k, v] of Object.entries(perCol)){
         if (!v) continue;
         const cell = (loc[k] ?? "").toString().toLowerCase();
@@ -582,7 +602,10 @@ class AdvancedPOSTracker {
     return dups;
   }
 
-  _autoFitOfficeColumns(){ /* CSS handles it (table-layout:auto, nowrap headers, width:max-content) */ }
+  _autoFitOfficeColumns(){
+    // natural auto-fit achieved via CSS (table-layout:auto, nowrap headers, width:max-content)
+    // keep hook for future tweaks
+  }
 
   // ---- Documents (PDF) storage & cell UI ----
   _docCellHTML(loc){
@@ -590,8 +613,8 @@ class AdvancedPOSTracker {
     const list = this._loadDocs()[id] || [];
     const links = list.map((d, i) => `<a href="${d.dataUrl}" target="_blank" rel="noopener">View ${i+1}</a>`).join(" &nbsp; ");
     const canUpload = Array.isArray(this.uploadAllowedUsers)
-      ? this.uploadAllowedUsers.includes(this.currentUser)
-      : true; // null => allow all
+        ? this.uploadAllowedUsers.includes(this.currentUser)
+        : true; // null => allow all
     const uploadBtn = canUpload
       ? `<label class="btn btn-sm btn-secondary" style="margin:0;cursor:pointer;">
            Upload<input type="file" accept="application/pdf" data-doc-for="${id}" style="display:none;">
@@ -599,6 +622,7 @@ class AdvancedPOSTracker {
       : "";
     return `<div class="doc-actions">${links || '<span style="opacity:.6">—</span>'}${uploadBtn ? '&nbsp;'+uploadBtn : ''}</div>`;
   }
+
   _handleDocUpload(id, file){
     if (!file || file.type !== "application/pdf"){ alert("Please select a PDF file."); return; }
     const fr = new FileReader();
@@ -610,27 +634,30 @@ class AdvancedPOSTracker {
     };
     fr.readAsDataURL(file);
   }
+
   _loadDocs(){
     try{ return JSON.parse(localStorage.getItem(this.docStorageKey) || "{}"); }catch{ return {}; }
   }
+
   _escape(v){
     return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
   }
 
-  // ---- PDF (frozen simple helper + advanced reports) ----
+  // ---- PDF ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
-  printReports(){ window.print(); } // (restored frozen helper)
 
-  // Professional reports PDF with orientation chooser & auto-fit widths
+  // Professional reports PDF with orientation chooser, DD/MM/YYYY dates, uniform light header fill,
+  // vertically centered cells, "Devices received today" in Region Summary,
+  // and AUTO-FIT column widths based on header + content.
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
 
-    // Orientation chooser (radio)
+    // Orientation chooser (radio buttons)
     if (!opts || !opts.orientation){
       const id = "pdf-orient-overlay";
-      if (document.getElementById(id)) return;
+      if (document.getElementById(id)) return; // already open
       const overlay = document.createElement("div");
       overlay.id = id;
       overlay.innerHTML = `
@@ -662,7 +689,7 @@ class AdvancedPOSTracker {
       return;
     }
 
-    // Helpers
+    // Setup / helpers
     const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
     const formatDMY = (d)=> {
       const dd = String(d.getDate()).padStart(2,"0");
@@ -684,7 +711,7 @@ class AdvancedPOSTracker {
 
     const rows = this.locations || [];
     const today = new Date();
-       const reportDateStr = formatDMY(today);
+    const reportDateStr = formatDMY(today);
 
     // Aggregates
     const totalOffices = rows.length;
@@ -695,12 +722,14 @@ class AdvancedPOSTracker {
       return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
     }, 0);
 
-    // Group by division (RMS last)
+    // Group by division
     const byDiv = {};
     rows.forEach(r=>{
       const d = r.division || "—";
       (byDiv[d] ||= []).push(r);
     });
+
+    // Division entries: alphabetical except "RMS HB Division" last
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
@@ -748,19 +777,19 @@ class AdvancedPOSTracker {
     let y = margin;
 
     // Colors / fonts
-    const headerFill = { r: 246, g: 248, b: 252 };
-    const stripeFill = { r: 252, g: 253, b: 255 };
+    const headerFill = { r: 246, g: 248, b: 252 };  // light, professional
+    const stripeFill = { r: 252, g: 253, b: 255 };  // subtle zebra
     const borderGray = 180;
     const brandBlue = { r: 52, g: 152, b: 219 };
 
     const fontTitle = 15;
     const fontSub   = 11;
-    const fontHead  = 9.5;
+    const fontHead  = 9.5;   // compact for single-page fit
     const fontBody  = 9;
     const lineH     = 11;
     const padX      = 6;
 
-    // Table columns
+    // Table columns (labels + alignment)
     const tableCols = [
       { key:'division', label:'Division', align:'left'  },
       { key:'offices',  label:'Offices', align:'center'},
@@ -776,11 +805,16 @@ class AdvancedPOSTracker {
     const tableX = margin;
     const tableW = pageW - margin*2;
 
-    // Auto-fit column widths
+    // --- Auto-fit column widths (measure header + content) ---
     function computeAutoWidths(){
+      // min widths (pt)
       const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
+
+      // measure header width at header font
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+
+      // measure content width at body font (consider divisions, numbers, totals row)
       doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
       const contentW = tableCols.map(() => 0);
 
@@ -794,15 +828,19 @@ class AdvancedPOSTracker {
       divisions.forEach(consider);
       consider(totalsRow);
 
+      // desired width = max(header, content, min)
       let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
       let sumDesired = desired.reduce((a,b)=>a+b,0);
 
+      // scale down if over
       if (sumDesired > tableW){
         const scale = tableW / sumDesired;
         desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
         let sum = desired.reduce((a,b)=>a+b,0);
+        // if still over (due to min constraints), shave from widest slack columns
         let tries = 0;
         while (sum > tableW && tries < 200){
+          // find column with most slack over min
           let idx = -1, slackMax = -1;
           for (let i=0;i<desired.length;i++){
             const slack = desired[i] - minW[i];
@@ -814,6 +852,7 @@ class AdvancedPOSTracker {
           tries++;
         }
       } else if (sumDesired < tableW){
+        // distribute leftover (bias to Division and longer-text columns)
         let leftover = tableW - sumDesired;
         const priorityKeys = ['division','pinst','req','rec','inst'];
         while (leftover > 0){
@@ -829,9 +868,11 @@ class AdvancedPOSTracker {
         }
       }
 
+      // assign to columns
       tableCols.forEach((c,i)=> c.w = desired[i]);
     }
 
+    // helpers
     function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
     function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
     function newPage(){ doc.addPage(); y = margin; drawHeader(); }
@@ -855,7 +896,7 @@ class AdvancedPOSTracker {
     }
     drawHeader();
 
-    // Region Summary
+    // Region Summary (two columns) — uses "Devices received today"
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Region Summary', margin, y); y += 12;
 
@@ -868,8 +909,8 @@ class AdvancedPOSTracker {
       ['Total Devices received', String(totalDevicesReceived)],
       ['Devices received today', String(devicesReceivedToday)]
     ];
-    const colGap = 260;
-    const valOffset = 190;
+    const colGap = 260; // right column group start
+    const valOffset = 190; // value alignment width
 
     rsLeft.forEach(([k,v],i)=>{
       ensureSpace(14);
@@ -884,12 +925,14 @@ class AdvancedPOSTracker {
     });
     y += 6;
 
+    // compute auto widths now that we know rows
     computeAutoWidths();
 
-    // Table header
+    // Table header (uniform background across the whole header row)
     function drawTableHeader(){
       ensureSpace(24);
       setBorder();
+      // compute header height from wrapped labels
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerHeights = tableCols.map(c => {
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
@@ -897,10 +940,12 @@ class AdvancedPOSTracker {
       });
       const headerH = Math.max(...headerHeights);
 
+      // Single full-width background
       doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
       doc.rect(tableX, y, totalW, headerH, 'F');
 
+      // Per-cell borders + text
       let x = tableX;
       tableCols.forEach(c=>{
         doc.rect(x, y, c.w, headerH, 'S');
@@ -917,6 +962,7 @@ class AdvancedPOSTracker {
       y += headerH;
     }
 
+    // Table row
     function drawRow(obj, stripe=false, bold=false){
       doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
       const cells = tableCols.map(col=>{
@@ -948,6 +994,7 @@ class AdvancedPOSTracker {
       y += rowH;
     }
 
+    // Render table
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text('Division-wise Detailed Report', margin, y); y += 8;
     drawTableHeader();
@@ -956,9 +1003,11 @@ class AdvancedPOSTracker {
       if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
       drawRow(r, idx % 2 === 1);
     });
+    // Totals row
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
     drawRow(totalsRow, false, true);
 
+    // Footer: page numbers + date on every page
     const pages = doc.getNumberOfPages();
     for (let i=1; i<=pages; i++){
       doc.setPage(i);
@@ -1025,14 +1074,14 @@ class AdvancedPOSTracker {
   // ---- Excel import/export ----
   downloadTemplate(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLIED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
-    // (spelling kept as per original template if needed; adjust if yours differs)
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
     const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Office','Contact Person','9876543210','9876543211','contact@postoffice.gov.in','Sample Address','Sample Location','Sample City','Sample State','123456',5,'EZETAP ANDROID X990','',0,'','Pending','Not Tested','None'];
     const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]); XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
   }
   exportCurrentData(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPORTED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    // Note: kept header text frozen (typo preserved if present in template) — data mapping remains correct
     const rows=this.locations.map(l=>[
       l.slNo||'',l.division||'',l.postOfficeName||'',l.postOfficeId||'',l.officeType||'',
       l.contactPersonName||'',l.contactPersonNo||'',l.altContactNo||'',l.contactEmail||'',
@@ -1124,23 +1173,6 @@ class AdvancedPOSTracker {
     if (!confirm("This action cannot be undone. Confirm again to proceed.")) return;
     this.locations=[]; this.nextLocationId=1; this.saveToStorage(); this.updateDashboard(); this.displayLocations();
     alert("All data cleared.");
-  }
-
-  // ---- (optional) frozen stats tile updater for Data Management ----
-  updateDataStatistics(){
-    const el = document.getElementById("dataStatistics");
-    if (!el) return;
-    const total = this.locations.length;
-    const cities = new Set(this.locations.map(l => (l.city||"").trim()).filter(Boolean)).size;
-    const divisions = new Set(this.locations.map(l => (l.division||"").trim()).filter(Boolean)).size;
-    const completed = this.locations.filter(l => l.installationStatus === "Completed").length;
-    el.innerHTML = `
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-number">${total}</div><div class="stat-label">Locations</div></div>
-        <div class="stat-card"><div class="stat-number">${divisions}</div><div class="stat-label">Divisions</div></div>
-        <div class="stat-card"><div class="stat-number">${cities}</div><div class="stat-label">Cities</div></div>
-        <div class="stat-card"><div class="stat-number">${completed}</div><div class="stat-label">Completed</div></div>
-      </div>`;
   }
 }
 

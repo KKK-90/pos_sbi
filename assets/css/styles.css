@@ -149,3 +149,14 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-g
 /* Blank cells highlighted (light red) */
 td.cell-blank { background:#fdecea !important; }
 
+/* --- Office wise details (scoped) --- */
+.table-scroll{ overflow:auto; }
+.owd-table{ table-layout:auto; width:max-content; border-collapse:separate; border-spacing:0; }
+.owd-table th{ position:sticky; top:0; z-index:1; white-space:nowrap; background:#f6f8fc; }
+.owd-table thead tr.filters th{ position:sticky; top:42px; background:#f8fafc; }
+.owd-filter{ width:100%; padding:6px 8px; font-size:13px; border:1px solid #e1e5e9; border-radius:4px; }
+.cell-empty{ background:#fdecec; }      /* light red for blanks */
+.cell-dup{ background:#fff3cd; }        /* light amber for duplicate Serial No */
+.doc-actions{ display:flex; gap:8px; justify-content:center; }
+
+

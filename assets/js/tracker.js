@@ -276,9 +276,6 @@ class AdvancedPOSTracker {
       return;
     }
     const totalOffices = rows.length;
-    const totalDevicesRequired = rows.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
-    const totalDevicesReceived = rows.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
-    const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
     const overallCompletionPct = totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0;
 
     const summaryHTML = `

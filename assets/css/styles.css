@@ -211,3 +211,38 @@ td.cell-blank{ background:#fdecec !important; }
 @media print{
   .owd-table th, .owd-table thead tr.filters th{ position:static; }
 }
+
+/* ===== Office wise details – alignment/sticky fixes ===== */
+:root { --owd-head-h: 48px; } /* matches your th padding + font size; adjust if you changed th padding */
+
+.table-scroll { overflow:auto; }
+
+/* keep same grid for header + filter rows */
+.owd-table{ width:100%; table-layout:auto; border-collapse:separate; border-spacing:0; }
+.owd-table th, .owd-table td{ padding:10px 12px; }
+
+/* header row */
+.owd-table thead tr.header th{
+  position:sticky; top:0; z-index:2;
+  background:#f6f8fc; white-space:nowrap; word-break:keep-all;
+  border-bottom:1px solid #e1e5e9;
+}
+
+/* inline filter row exactly under header */
+.owd-table thead tr.filters th{
+  position:sticky; top:var(--owd-head-h); z-index:1;
+  background:#ffffff; border-bottom:1px solid #e1e5e9;
+  padding:8px 10px;
+}
+
+/* filter inputs */
+.owd-filter{
+  width:100%; padding:6px 8px; font-size:13px;
+  border:1px solid #d8dee5; border-radius:6px; background:#fff;
+}
+
+/* highlight rules (unchanged) */
+.cell-empty{ background:#fdecec; }
+.cell-dup{ background:#fff3cd; }
+.doc-actions{ display:flex; gap:8px; justify-content:center; }
+

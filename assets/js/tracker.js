@@ -145,7 +145,7 @@ class AdvancedPOSTracker {
             <div class="division-stat"><div class="division-stat-number">${s.total}</div><div class="division-stat-label">Total Locations</div></div>
             <div class="division-stat"><div class="division-stat-number">${s.deployed}</div><div class="division-stat-label">Deployed</div></div>
             <div class="division-stat"><div class="division-stat-number">${s.pending}</div><div class="division-stat-label">Pending</div></div>
-            <div class="division-stat"><div class="division-stat-number">${s.issues}</div><div class="division-stat-label">Offices with Issues</div></div>
+            <div class="division-stat"><div class="division-stat-number">${s.issues}</div><div class="division-stat-label">Issues</div></div>
           </div>
         </div>`;
     }
@@ -454,7 +454,7 @@ class AdvancedPOSTracker {
     this._bindOfficeFilters(cols);
 
     // Apply all filters (inline, global, toolbar dropdowns)
-    let { rows, dupSerials } = this._applyOfficeFilters(cols, centerKeys);
+    let { rows } = this._applyOfficeFilters(cols);
 
     // Safety: if everything filtered out unintentionally, show all
     if (!rows.length && (this.locations || []).length) rows = this.locations;
@@ -805,23 +805,25 @@ class AdvancedPOSTracker {
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // ===== Enhanced Reports PDF (moved "Devices received today — Division-wise" to a fresh page) =====
+  // ===== Enhanced Reports PDF — now supports date / date-range selection =====
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
 
-    // Orientation chooser
+    // --- Selection overlay (orientation + period) ---
     if (!opts || !opts.orientation){
       const id = "pdf-orient-overlay";
       if (document.getElementById(id)) return;
+      const todayYMD = new Date().toISOString().slice(0,10);
       const overlay = document.createElement("div");
       overlay.id = id;
       overlay.innerHTML = `
         <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
-          <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:20px 22px;width:340px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
-            <h3 style="margin:0 0 8px;font-size:16px;color:#2c3e50;">Export Reports PDF</h3>
-            <p style="margin:0 0 12px;font-size:13px;color:#34495e;">Choose orientation:</p>
-            <div style="display:flex;gap:12px;margin:0 0 16px;">
+          <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:420px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+            <h3 style="margin:0 0 10px;font-size:16px;color:#2c3e50;">Export Reports PDF</h3>
+
+            <div style="margin:4px 0 8px;font-size:13px;color:#34495e;"><strong>Orientation</strong></div>
+            <div style="display:flex;gap:12px;margin:0 0 10px;">
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
                 <input type="radio" name="pdf-orient" value="portrait"> Portrait
               </label>
@@ -829,24 +831,89 @@ class AdvancedPOSTracker {
                 <input type="radio" name="pdf-orient" value="landscape" checked> Landscape
               </label>
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:10px;">
+
+            <div style="margin:6px 0 6px;font-size:13px;color:#34495e;"><strong>Report period</strong></div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                <input type="radio" name="pdf-period" value="all" checked> All data (no date filter)
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                <input type="radio" name="pdf-period" value="single"> Single date:
+                <input id="pdf-date" type="date" value="${todayYMD}" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                <input type="radio" name="pdf-period" value="range"> Date range:
+                <input id="pdf-start" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+                <span style="opacity:.7">to</span>
+                <input id="pdf-end" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              </label>
+            </div>
+
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
               <button id="pdf-orient-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
               <button id="pdf-orient-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Generate</button>
             </div>
           </div>
         </div>`;
       document.body.appendChild(overlay);
+
+      // Enable/disable inputs based on chosen period
+      const syncPeriodInputs = () => {
+        const val = overlay.querySelector('input[name="pdf-period"]:checked')?.value;
+        overlay.querySelector('#pdf-date').disabled  = (val!=='single');
+        overlay.querySelector('#pdf-start').disabled = (val!=='range');
+        overlay.querySelector('#pdf-end').disabled   = (val!=='range');
+      };
+      overlay.querySelectorAll('input[name="pdf-period"]').forEach(r=> r.addEventListener('change', syncPeriodInputs));
+      syncPeriodInputs();
+
       overlay.querySelector("#pdf-orient-cancel").onclick = ()=> overlay.remove();
       overlay.querySelector("#pdf-orient-generate").onclick = ()=>{
         const sel = overlay.querySelector('input[name="pdf-orient"]:checked')?.value || "landscape";
+        const period = overlay.querySelector('input[name="pdf-period"]:checked')?.value || "all";
+        const date = overlay.querySelector('#pdf-date')?.value || "";
+        const start = overlay.querySelector('#pdf-start')?.value || "";
+        const end = overlay.querySelector('#pdf-end')?.value || "";
         overlay.remove();
-        this.exportReportsPDF({ orientation: sel });
+
+        if (period === 'single'){
+          this.exportReportsPDF({ orientation: sel, reportMode: 'single', reportDate: date });
+        } else if (period === 'range'){
+          this.exportReportsPDF({ orientation: sel, reportMode: 'range', startDate: start, endDate: end });
+        } else {
+          this.exportReportsPDF({ orientation: sel, reportMode: 'all' });
+        }
       };
       return;
     }
 
-    // Setup / helpers
+    // ==== PDF generation with optional date filters ====
     const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
+
+    const ymdToDMY = (ymd)=>{
+      if (!ymd) return null;
+      const [Y,M,D] = ymd.split("-");
+      if (!Y || !M || !D) return null;
+      return `${D.padStart(2,"0")}/${M.padStart(2,"0")}/${Y}`;
+    };
+    const parseYMD = (ymd)=>{
+      if (!ymd) return null;
+      const d = new Date(ymd+"T00:00:00");
+      return isNaN(d) ? null : d;
+    };
+    const sameDMY = (val, dmy)=>{
+      const n = normalizeToDMY(val);
+      return n && dmy && n === dmy;
+    };
+    const inRange = (val, startYMD, endYMD)=>{
+      const d = parseYMDFromAny(val);
+      if (!d) return false;
+      const s = startYMD ? parseYMD(startYMD) : null;
+      const e = endYMD ? parseYMD(endYMD) : null;
+      if (s && d < s) return false;
+      if (e && d > e) return false;
+      return true;
+    };
     const formatDMY = (d)=> {
       const dd = String(d.getDate()).padStart(2,"0");
       const mm = String(d.getMonth()+1).padStart(2,"0");
@@ -864,19 +931,62 @@ class AdvancedPOSTracker {
       else { const d=new Date(t); return isNaN(d)? null: formatDMY(d); }
       return `${dd.padStart(2,"0")}/${mm.padStart(2,"0")}/${yyyy}`;
     };
+    const parseYMDFromAny = (val)=>{
+      // Accept "YYYY-MM-DD", "DD/MM/YYYY", "DD-MM-YYYY", Date object
+      if (!val) return null;
+      if (val instanceof Date) return isNaN(val)? null : new Date(val.getFullYear(),val.getMonth(),val.getDate());
+      const s = String(val).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return parseYMD(s);
+      let dd, mm, yyyy;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)){ [dd,mm,yyyy] = s.split("/"); }
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(s)){ [dd,mm,yyyy] = s.split("-"); }
+      else {
+        const d = new Date(s);
+        return isNaN(d) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+      return parseYMD(`${yyyy}-${mm}-${dd}`);
+    };
+
+    // Period selection
+    const mode = opts.reportMode || 'all';
+    const today = new Date();
+    const todayDMY = formatDMY(today);
 
     const rows = this.locations || [];
-    const today = new Date();
-    const reportDateStr = formatDMY(today);
 
-    // Aggregates
+    // For labels + filtering
+    let devicesPeriodLabel = "today";
+    let singleDMY = null, rangeStartDMY = null, rangeEndDMY = null;
+    let startYMD = null, endYMD = null;
+
+    if (mode === 'single' && opts.reportDate){
+      singleDMY = ymdToDMY(opts.reportDate);
+      devicesPeriodLabel = `on ${singleDMY}`;
+    } else if (mode === 'range' && opts.startDate && opts.endDate){
+      startYMD = opts.startDate; endYMD = opts.endDate;
+      rangeStartDMY = ymdToDMY(startYMD); rangeEndDMY = ymdToDMY(endYMD);
+      devicesPeriodLabel = `from ${rangeStartDMY} to ${rangeEndDMY}`;
+    } else {
+      // all
+      // keep "today" wording for backward compatibility
+    }
+
+    // Aggregates (unfiltered)
     const totalOffices = rows.length;
     const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
     const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
     const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
-    const devicesReceivedToday = rows.reduce((s,l)=> {
-      return s + (normalizeToDMY(l.dateOfReceiptOfDevice) === reportDateStr ? toInt(l.noOfDevicesReceived) : 0);
-    }, 0);
+
+    // Devices received for selected period
+    let devicesReceivedInPeriod = 0;
+    if (mode === 'single' && singleDMY){
+      devicesReceivedInPeriod = rows.reduce((s,l)=> s + (sameDMY(l.dateOfReceiptOfDevice, singleDMY) ? toInt(l.noOfDevicesReceived) : 0), 0);
+    } else if (mode === 'range' && startYMD && endYMD){
+      devicesReceivedInPeriod = rows.reduce((s,l)=> s + (inRange(l.dateOfReceiptOfDevice, startYMD, endYMD) ? toInt(l.noOfDevicesReceived) : 0), 0);
+    } else {
+      // all -> show "today" as before
+      devicesReceivedInPeriod = rows.reduce((s,l)=> s + (normalizeToDMY(l.dateOfReceiptOfDevice) === todayDMY ? toInt(l.noOfDevicesReceived) : 0), 0);
+    }
 
     // Group by division
     const byDiv = {};
@@ -885,14 +995,13 @@ class AdvancedPOSTracker {
       (byDiv[d] ||= []).push(r);
     });
 
-    // Division entries: alphabetical except "RMS HB Division" last
+    // Division entries (main table): alphabetical except "RMS HB Division" last
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
       return a.localeCompare(b);
     });
 
-    // Rows for main table
     const divisions = entries.map(([division, arr])=>{
       const offices = arr.length;
       const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
@@ -925,18 +1034,28 @@ class AdvancedPOSTracker {
       pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
     };
 
-    // Build "Devices received today" detail list (grouped by division)
-    const todayGroups = entries.map(([division, arr])=>{
-      const list = arr
-        .filter(r => normalizeToDMY(r.dateOfReceiptOfDevice) === reportDateStr && toInt(r.noOfDevicesReceived) > 0)
+    // Build "Devices received ... — Division-wise" list for selected period
+    const periodGroups = entries.map(([division, arr])=>{
+      const items = arr
+        .filter(r => {
+          if (mode === 'single' && singleDMY){
+            return sameDMY(r.dateOfReceiptOfDevice, singleDMY) && toInt(r.noOfDevicesReceived) > 0;
+          } else if (mode === 'range' && startYMD && endYMD){
+            return inRange(r.dateOfReceiptOfDevice, startYMD, endYMD) && toInt(r.noOfDevicesReceived) > 0;
+          } else {
+            // all -> today (backward compatibility)
+            return normalizeToDMY(r.dateOfReceiptOfDevice) === todayDMY && toInt(r.noOfDevicesReceived) > 0;
+          }
+        })
         .map(r => ({
           division,
           po: `${r.postOfficeName || ""}${r.postOfficeId ? " ("+r.postOfficeId+")" : ""}`,
           n: toInt(r.noOfDevicesReceived)
         }));
-      const totalToday = list.reduce((s,x)=> s + x.n, 0);
-      return { division, items: list, totalToday };
-    }).filter(g => g.items.length > 0);
+
+      const total = items.reduce((s,x)=> s + x.n, 0);
+      return { division, items, total };
+    }).filter(g => g.items.length);
 
     // PDF doc
     const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
@@ -945,9 +1064,9 @@ class AdvancedPOSTracker {
     const margin = 32;
     let y = margin;
 
-    // Colors / fonts
-    const headerFill = { r: 232, g: 236, b: 246 };  // darker matching fill (header + Total row)
-    const stripeFill = { r: 248, g: 250, b: 255 };  // subtle zebra
+    // Colors / fonts (kept professional)
+    const headerFill = { r: 232, g: 236, b: 246 };
+    const stripeFill = { r: 248, g: 250, b: 255 };
     const borderGray = 180;
     const brandBlue = { r: 52, g: 152, b: 219 };
 
@@ -958,7 +1077,7 @@ class AdvancedPOSTracker {
     const lineH     = 11;
     const padX      = 6;
 
-    // Table columns (labels + alignment)
+    // Table columns
     const tableCols = [
       { key:'division', label:'Division', align:'left'  },
       { key:'offices',  label:'Offices', align:'center'},
@@ -974,7 +1093,7 @@ class AdvancedPOSTracker {
     const tableX = margin;
     const tableW = pageW - margin*2;
 
-    // --- Auto-fit column widths (measure header + content) ---
+    // Auto-fit widths
     function computeAutoWidths(){
       const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
@@ -1047,7 +1166,15 @@ class AdvancedPOSTracker {
       doc.setTextColor(0,0,0);
       doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
       doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
-      doc.text(`Report for the date: ${reportDateStr}`, margin, y); y += 8;
+
+      // Period line
+      if (mode === 'single' && singleDMY){
+        doc.text(`Report for the date: ${singleDMY}`, margin, y); y += 8;
+      } else if (mode === 'range' && rangeStartDMY && rangeEndDMY){
+        doc.text(`Report period: ${rangeStartDMY} to ${rangeEndDMY}`, margin, y); y += 8;
+      } else {
+        doc.text(`Report for the date: ${todayDMY}`, margin, y); y += 8;
+      }
 
       setBorder(); doc.line(margin, y, pageW - margin, y); y += 16;
     }
@@ -1064,7 +1191,10 @@ class AdvancedPOSTracker {
     ];
     const rsRight = [
       ['Total Devices received', String(totalDevicesReceived)],
-      ['Devices received today', String(devicesReceivedToday)]
+      [
+        (mode==='range' ? 'Devices received in period' : (mode==='single' ? 'Devices received that day' : 'Devices received today')),
+        String(devicesReceivedInPeriod)
+      ]
     ];
     const colGap = 260; // right column group start
     const valOffset = 190; // value alignment width
@@ -1088,7 +1218,7 @@ class AdvancedPOSTracker {
     function drawTableHeader(){
       ensureSpace(24);
       setBorder();
-      // compute header height from wrapped labels
+      // compute header height
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headerHeights = tableCols.map(c => {
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
@@ -1096,7 +1226,6 @@ class AdvancedPOSTracker {
       });
       const headerH = Math.max(...headerHeights);
 
-      // Full-width darker header background
       doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
       const totalW = tableCols.reduce((s,c)=>s+c.w,0);
       doc.rect(tableX, y, totalW, headerH, 'F');
@@ -1166,15 +1295,13 @@ class AdvancedPOSTracker {
     if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
     drawRow(totalsRow, false, true, headerFill);
 
-    // ------ Devices received today — Division-wise (start on a FRESH PAGE) ------
-    if (todayGroups.length){
-      // Force new page for professional separation
+    // ------ Devices received <period> — Division-wise list ------
+    if (periodGroups.length){
+      // Always move to a fresh page for clean layout (per your previous direction)
       newPage();
-
       doc.setFont('helvetica','bold'); doc.setFontSize(12);
-      doc.text('Devices received details', margin, y); y += 8;
+      doc.text(`Devices received ${devicesPeriodLabel} — Division-wise`, margin, y); y += 6;
 
-      // Compact, professional full-width table
       const cols2 = [
         { key:'division', label:'Division', align:'left'  },
         { key:'po',       label:'Post Office', align:'left' },
@@ -1183,53 +1310,45 @@ class AdvancedPOSTracker {
 
       // Flatten rows with group headers
       const rows2 = [];
-      todayGroups.forEach(g=>{
-        rows2.push({ _group:true, division:g.division, total:g.totalToday });
+      periodGroups.forEach(g=>{
+        rows2.push({ _group:true, division:g.division, total:g.total });
         g.items.forEach(it => rows2.push({ division:g.division, po:it.po, n:it.n }));
       });
 
-      // Auto widths to use the full page width
-      const min2 = [110, 220, 90];
-      const tableW2 = pageW - margin*2;
-
+      // Auto widths for second table
+      const min2 = [110, 220, 80];
       doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
       const headW2 = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
       doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
       const contentW2 = cols2.map(() => 0);
-
       rows2.forEach(r=>{
         cols2.forEach((c,i)=>{
           const raw = r._group
-            ? (c.key==='division' ? `${r.division}  —  Total Today: ${r.total}` : '')
+            ? (c.key==='division' ? `${r.division}  —  Total: ${r.total}` : '')
             : String(r[c.key] ?? '');
           const w = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
           if (w > contentW2[i]) contentW2[i] = w;
         });
       });
-
       let desired2 = cols2.map((c,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
+      const tableW2 = pageW - margin*2;
       let sum2 = desired2.reduce((a,b)=>a+b,0);
-
       if (sum2 > tableW2){
         const scale = tableW2 / sum2;
         desired2 = desired2.map((w,i)=> Math.max(min2[i], Math.floor(w*scale)));
         sum2 = desired2.reduce((a,b)=>a+b,0);
       } else if (sum2 < tableW2){
-        // expand Post Office column to fill leftover first, then Division
         let leftover = tableW2 - sum2;
-        while (leftover > 0){
-          if (leftover) { desired2[1] += 1; leftover--; }
-          if (leftover) { desired2[0] += 1; leftover--; }
-          if (leftover) { desired2[2] += 1; leftover--; }
-        }
+        while (leftover-- > 0) desired2[1] += 1; // widen PO col
         sum2 = tableW2;
       }
       cols2.forEach((c,i)=> c.w = desired2[i]);
 
       // Draw header
       const drawHeader2 = ()=>{
-        const headerH = 22;
+        ensureSpace(22);
         setBorder();
+        const headerH = 22;
         doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
         doc.rect(margin, y, tableW2, headerH, 'F');
         let xx = margin;
@@ -1255,12 +1374,12 @@ class AdvancedPOSTracker {
           doc.text(text, margin + padX, y + 12);
           y += h;
         } else {
+          doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
           const h = 18;
           ensureSpace(h);
           let xx = margin;
           setBorder();
-          doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-          cols2.forEach(c=>{
+          cols2.forEach((c)=>{
             const raw = String(r[c.key] ?? '');
             doc.rect(xx, y, c.w, h, 'S');
             if (c.align === 'left'){
@@ -1280,12 +1399,18 @@ class AdvancedPOSTracker {
     for (let i=1; i<=pages; i++){
       doc.setPage(i);
       doc.setFont('helvetica','normal'); doc.setFontSize(9);
-      doc.text(`Generated on ${reportDateStr}`, margin, pageH - 12, { align:'left' });
-      doc.text(`Page ${i} / ${pages}`, pageW - margin, pageH - 12, { align:'right' });
+      const stamp = (mode==='single' && singleDMY) ? singleDMY :
+                    (mode==='range' && rangeStartDMY && rangeEndDMY) ? `${rangeStartDMY}–${rangeEndDMY}` :
+                    todayDMY;
+      doc.text(`Generated on ${stamp}`, pageW - margin, pageH - 12, { align:'right' });
+      doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'left' });
     }
 
-    const stamp = new Date().toISOString().slice(0,10);
-    doc.save(`NKR_POS_Deployment_Report_${stamp}.pdf`);
+    const outStamp = new Date().toISOString().slice(0,10);
+    const suffix = (mode==='single' && opts.reportDate)
+      ? `_Date-${opts.reportDate}`
+      : (mode==='range' && opts.startDate && opts.endDate) ? `_Range-${opts.startDate}_to_${opts.endDate}` : '';
+    doc.save(`NKR_POS_Deployment_Report_${outStamp}${suffix}.pdf`);
   }
 
   _pdfSimple(title){
@@ -1346,19 +1471,126 @@ class AdvancedPOSTracker {
     const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Office','Contact Person','9876543210','9876543211','contact@postoffice.gov.in','Sample Address','Sample Location','Sample City','Sample State','123456',5,'EZETAP ANDROID X990','',0,'','Pending','Not Tested','None'];
     const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]); XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
   }
-  exportCurrentData(){
+
+  // Backward compatible: if called with no opts, exports ALL data (unchanged behavior).
+  // If called with { reportMode:'single', reportDate:'YYYY-MM-DD' } or { reportMode:'range', startDate:'YYYY-MM-DD', endDate:'YYYY-MM-DD' }
+  // it filters rows by dateOfReceiptOfDevice accordingly.
+  exportCurrentData(opts){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
     const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
-    const rows=this.locations.map(l=>[
+
+    const parseYMD = (ymd)=> { const d=new Date(ymd+"T00:00:00"); return isNaN(d)? null : d; };
+    const parseAnyToYMDDate = (v)=>{
+      if (!v) return null;
+      const s = String(v).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return parseYMD(s);
+      let dd,mm,yy;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)){ [dd,mm,yy]=s.split("/"); return parseYMD(`${yy}-${mm}-${dd}`); }
+      if (/^\d{2}-\d{2}-\d{4}$/.test(s)){ [dd,mm,yy]=s.split("-"); return parseYMD(`${yy}-${mm}-${dd}`); }
+      const d=new Date(s); return isNaN(d)? null: new Date(d.getFullYear(),d.getMonth(),d.getDate());
+    };
+    const inRange = (val, sYMD, eYMD)=>{
+      if (!sYMD && !eYMD) return true;
+      const d = parseAnyToYMDDate(val);
+      if (!d) return false;
+      const s = sYMD ? parseYMD(sYMD) : null;
+      const e = eYMD ? parseYMD(eYMD) : null;
+      if (s && d < s) return false;
+      if (e && d > e) return false;
+      return true;
+    };
+    const sameDay = (val, ymd)=>{
+      if (!ymd) return true;
+      const d = parseAnyToYMDDate(val);
+      const s = parseYMD(ymd);
+      if (!d || !s) return false;
+      return d.getTime() === s.getTime();
+    };
+
+    let rowsSrc = this.locations;
+    if (opts && opts.reportMode === 'single' && opts.reportDate){
+      rowsSrc = rowsSrc.filter(l => sameDay(l.dateOfReceiptOfDevice, opts.reportDate));
+    } else if (opts && opts.reportMode === 'range' && opts.startDate && opts.endDate){
+      rowsSrc = rowsSrc.filter(l => inRange(l.dateOfReceiptOfDevice, opts.startDate, opts.endDate));
+    }
+
+    const rows=rowsSrc.map(l=>[
       l.slNo||'',l.division||'',l.postOfficeName||'',l.postOfficeId||'',l.officeType||'',
       l.contactPersonName||'',l.contactPersonNo||'',l.altContactNo||'',l.contactEmail||'',
       l.locationAddress||'',l.location||'',l.city||'',l.state||'',l.pincode||'',
       l.numberOfPosToBeDeployed||'',l.typeOfPosTerminal||'',l.dateOfReceiptOfDevice||'',
       l.noOfDevicesReceived||'',l.serialNo||'',l.installationStatus||'',l.functionalityStatus||'',l.issuesIfAny||''
     ]);
+
     const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,...rows]); XLSX.utils.book_append_sheet(wb,ws,"POS Data");
-    XLSX.writeFile(wb,`POS_Data_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
+    const suffix = (opts && opts.reportMode==='single' && opts.reportDate)
+      ? `_Date-${opts.reportDate}`
+      : (opts && opts.reportMode==='range' && opts.startDate && opts.endDate)
+        ? `_Range-${opts.startDate}_to_${opts.endDate}`
+        : '';
+    XLSX.writeFile(wb,`POS_Data_Export_${new Date().toISOString().slice(0,10)}${suffix}.xlsx`);
   }
+
+  // Optional helper: shows a small dialog to export Excel by single date / range (no impact if unused)
+  exportDataWithDialog(){
+    if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
+    const id = "excel-export-overlay";
+    if (document.getElementById(id)) return;
+    const todayYMD = new Date().toISOString().slice(0,10);
+    const overlay = document.createElement("div");
+    overlay.id = id;
+    overlay.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:420px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+          <h3 style="margin:0 0 10px;font-size:16px;color:#2c3e50;">Export Data (Excel)</h3>
+
+          <div style="margin:6px 0 6px;font-size:13px;color:#34495e;"><strong>Period</strong></div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="radio" name="xl-period" value="all" checked> All data
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="radio" name="xl-period" value="single"> Single date:
+              <input id="xl-date" type="date" value="${todayYMD}" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="radio" name="xl-period" value="range"> Date range:
+              <input id="xl-start" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              <span style="opacity:.7">to</span>
+              <input id="xl-end" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+            </label>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+            <button id="xl-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
+            <button id="xl-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Export</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const sync = () => {
+      const v = overlay.querySelector('input[name="xl-period"]:checked')?.value;
+      overlay.querySelector('#xl-date').disabled  = (v!=='single');
+      overlay.querySelector('#xl-start').disabled = (v!=='range');
+      overlay.querySelector('#xl-end').disabled   = (v!=='range');
+    };
+    overlay.querySelectorAll('input[name="xl-period"]').forEach(r=> r.addEventListener('change', sync));
+    sync();
+
+    overlay.querySelector("#xl-cancel").onclick = ()=> overlay.remove();
+    overlay.querySelector("#xl-generate").onclick = ()=>{
+      const v = overlay.querySelector('input[name="xl-period"]:checked')?.value || 'all';
+      const date  = overlay.querySelector('#xl-date')?.value || "";
+      const start = overlay.querySelector('#xl-start')?.value || "";
+      const end   = overlay.querySelector('#xl-end')?.value || "";
+      overlay.remove();
+      if (v==='single') this.exportCurrentData({ reportMode:'single', reportDate:date });
+      else if (v==='range') this.exportCurrentData({ reportMode:'range', startDate:start, endDate:end });
+      else this.exportCurrentData();
+    };
+  }
+
   exportToExcel(){ this.exportCurrentData(); }
   showImportModal(){ document.getElementById("importModal").style.display="block"; }
   closeImportModal(){ document.getElementById("importModal").style.display="none"; document.getElementById("importPreview").classList.add("hidden"); document.getElementById("excelFileInput").value=""; }

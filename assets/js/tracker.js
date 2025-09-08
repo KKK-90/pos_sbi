@@ -119,7 +119,7 @@ class AdvancedPOSTracker {
     const pending = this.locations.filter(l => l.installationStatus === "Pending").length;
     const withIssues = this.locations.filter(l => l.issuesIfAny && l.issuesIfAny.trim() && l.issuesIfAny !== "None").length;
     document.getElementById("overallStats").innerHTML = `
-      <div class="stat-card"><div class="stat-number">${totalLocations}</div><div class="stat-label">Total Locations</div></div>
+      <div class="stat-card"><div class="stat-number">${totalLocations}</div><div class="stat-label">Total Offices</div></div>
       <div class="stat-card"><div class="stat-number">${totalDevicesDeployed}</div><div class="stat-label">Deployed Devices</div></div>
       <div class="stat-card"><div class="stat-number">${pending}</div><div class="stat-label">Installations Pending</div></div>
       <div class="stat-card"><div class="stat-number">${withIssues}</div><div class="stat-label">Issues Reported</div></div>
@@ -367,7 +367,7 @@ class AdvancedPOSTracker {
             <th>Pending</th>
             <th>Devices installed</th>
             <th>Pending for installation</th>
-            <th>Issues</th>
+            <th>Offices with Issues</th>
             <th>Completed</th>
             <th>Completion %</th>
           </tr>

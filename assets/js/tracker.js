@@ -145,7 +145,7 @@ class AdvancedPOSTracker {
             <div class="division-stat"><div class="division-stat-number">${s.total}</div><div class="division-stat-label">Total Locations</div></div>
             <div class="division-stat"><div class="division-stat-number">${s.deployed}</div><div class="division-stat-label">Deployed</div></div>
             <div class="division-stat"><div class="division-stat-number">${s.pending}</div><div class="division-stat-label">Pending</div></div>
-            <div class="division-stat"><div class="division-stat-number">${s.issues}</div><div class="division-stat-label">Issues</div></div>
+            <div class="division-stat"><div class="division-stat-number">${s.issues}</div><div class="division-stat-label">Offices with Issues</div></div>
           </div>
         </div>`;
     }

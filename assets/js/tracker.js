@@ -835,7 +835,7 @@ class AdvancedPOSTracker {
             <div style="margin:6px 0 6px;font-size:13px;color:#34495e;"><strong>Report period</strong></div>
             <div style="display:flex;flex-direction:column;gap:8px;">
               <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
-                <input type="radio" name="pdf-period" value="all" checked> All data (no date filter)
+                <input type="radio" name="pdf-period" value="all" checked> Today
               </label>
               <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
                 <input type="radio" name="pdf-period" value="single"> Single date:
@@ -1086,7 +1086,7 @@ class AdvancedPOSTracker {
       { key:'pend',     label:'Pending', align:'center'},
       { key:'inst',     label:'Devices Installed', align:'center'},
       { key:'pinst',    label:'Pending Installation', align:'center'},
-      { key:'iss',      label:'Issues', align:'center'},
+      { key:'iss',      label:'Offices with Issues', align:'center'},
       { key:'comp',     label:'Completed', align:'center'},
       { key:'pct',      label:'Completion %', align:'center'},
     ];

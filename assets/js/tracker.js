@@ -1394,17 +1394,24 @@ class AdvancedPOSTracker {
       });
     }
 
-    // Footer: page numbers + date on every page
-    const pages = doc.getNumberOfPages();
-    for (let i=1; i<=pages; i++){
-      doc.setPage(i);
-      doc.setFont('helvetica','normal'); doc.setFontSize(9);
-      const stamp = (mode==='single' && singleDMY) ? singleDMY :
-                    (mode==='range' && rangeStartDMY && rangeEndDMY) ? `${rangeStartDMY}–${rangeEndDMY}` :
-                    todayDMY;
-      doc.text(`Generated on ${stamp}`, pageW - margin, pageH - 12, { align:'right' });
-      doc.text(`Page ${i} / ${pages}`, margin, pageH - 12, { align:'left' });
-    }
+    // Footer: page numbers + date on every page (always generation date in DD/MM/YYYY)
+const pages = doc.getNumberOfPages();
+for (let i = 1; i <= pages; i++) {
+  doc.setPage(i);
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(9);
+
+  // Force generation date (DD/MM/YYYY) regardless of selected report date/range
+  const _gen = new Date();
+  const _dd  = String(_gen.getDate()).padStart(2, '0');
+  const _mm  = String(_gen.getMonth() + 1).padStart(2, '0');
+  const _yy  = _gen.getFullYear();
+  const generatedOnDMY = `${_dd}/${_mm}/${_yy}`;
+
+  doc.text(`Generated on ${generatedOnDMY}`, pageW - margin, pageH - 12, { align: 'right' });
+  doc.text(`Page ${i} / ${pages}`,        margin,        pageH - 12, { align: 'left'  });
+}
+
 
     const outStamp = new Date().toISOString().slice(0,10);
     const suffix = (mode==='single' && opts.reportDate)

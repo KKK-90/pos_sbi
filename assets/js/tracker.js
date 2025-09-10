@@ -305,8 +305,10 @@ class AdvancedPOSTracker {
       return a.localeCompare(b);
     });
 
-    const tdC = ' style="text-align:center"';
-    const tableRows = entries.map(([division, arr]) => {
+      const tdC = ' style="text-align:center"';
+      const thL = ' style="text-align:left"';
+      const thC = ' style="text-align:center"';
+      const tableRows = entries.map(([division, arr]) => {
       const offices = arr.length;
       const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
       const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
@@ -353,31 +355,32 @@ class AdvancedPOSTracker {
       </tr>
     `;
 
-    const divisionsHTML = `
-      <div class="section-header" style="margin-top:20px;">
-        <h3 class="section-title">Division-wise Detailed Report</h3>
-      </div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Division</th>
-            <th>Offices</th>
-            <th>Devices Required</th>
-            <th>Devices Received</th>
-            <th>Pending</th>
-            <th>Devices installed</th>
-            <th>Pending for installation</th>
-            <th>Offices with Issues</th>
-            <th>Completed</th>
-            <th>Completion %</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
-          ${totalRow}
-        </tbody>
-      </table>
-    `;
+const divisionsHTML = `
+  <div class="section-header" style="margin-top:20px;">
+    <h3 class="section-title">Division-wise Detailed Report</h3>
+  </div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th${thL}>Division</th>
+        <th${thC}>Offices</th>
+        <th${thC}>Devices Required</th>
+        <th${thC}>Devices Received</th>
+        <th${thC}>Pending</th>
+        <th${thC}>Devices installed</th>
+        <th${thC}>Installations Pending</th>
+        <th${thC}>Issues</th>
+        <th${thC}>Completed</th>
+        <th${thC}>Completion %</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
+      ${totalRow}
+    </tbody>
+  </table>
+`;
+
 
     const issuesList = rows.filter(r => hasIssue(r.issuesIfAny));
     let issuesHTML = "";

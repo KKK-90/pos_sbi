@@ -1093,60 +1093,89 @@ class AdvancedPOSTracker {
     const tableX = margin;
     const tableW = pageW - margin*2;
 
-    // Auto-fit widths
-    function computeAutoWidths(){
-      const minW = tableCols.map(c => c.key === 'division' ? 110 : 46);
-      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-      const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
-      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-      const contentW = tableCols.map(() => 0);
+// --- Auto-fit column widths (no word breaking, full-width fit) ---
+function computeAutoWidths(){
+  // Helper: longest single-word width at current font settings
+  const longestWordWidth = (text) => {
+    const s = (text ?? "").toString();
+    // allow breaks at spaces, slashes, and hyphens — but never inside a word
+    const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
+    if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
+    let w = 0;
+    for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
+    return w;
+  };
 
-      const consider = obj => {
-        tableCols.forEach((c, i) => {
-          const v = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
-          const w = Math.ceil(doc.getTextWidth(v) + padX*2 + 2);
-          if (w > contentW[i]) contentW[i] = w;
-        });
-      };
-      divisions.forEach(consider);
-      consider(totalsRow);
+  // Base minimums (pt)
+  const baseMin = tableCols.map(c => c.key === 'division' ? 120 : 52);
 
-      let desired = tableCols.map((c,i)=> Math.max(minW[i], headerW[i], contentW[i]));
-      let sumDesired = desired.reduce((a,b)=>a+b,0);
+  // Header widths & header "no-break" minima at header font
+  doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+  const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+  const headerNoBreakMin = tableCols.map(c => Math.ceil(longestWordWidth(c.label) + padX*2 + 4));
 
-      if (sumDesired > tableW){
-        const scale = tableW / sumDesired;
-        desired = desired.map((w,i)=> Math.max(minW[i], Math.floor(w * scale)));
-        let sum = desired.reduce((a,b)=>a+b,0);
-        let tries = 0;
-        while (sum > tableW && tries < 200){
-          let idx = -1, slackMax = -1;
-          for (let i=0;i<desired.length;i++){
-            const slack = desired[i] - minW[i];
-            if (slack > slackMax){ slackMax = slack; idx = i; }
-          }
-          if (idx < 0) break;
-          desired[idx] -= 1;
-          sum -= 1;
-          tries++;
-        }
-      } else if (sumDesired < tableW){
-        let leftover = tableW - sumDesired;
-        const priorityKeys = ['division','pinst','req','rec','inst'];
-        while (leftover > 0){
-          let advanced = false;
-          for (let i=0;i<tableCols.length && leftover>0;i++){
-            if (priorityKeys.includes(tableCols[i].key)){
-              desired[i] += 1; leftover -= 1; advanced = true;
-            }
-          }
-          if (!advanced){
-            for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i]+=1; leftover-=1; }
-          }
-        }
+  // Content widths & "no-break" minima at body font
+  doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+  const contentW = tableCols.map(() => 0);
+  const contentNoBreakMin = tableCols.map(() => 0);
+
+  const consider = obj => {
+    tableCols.forEach((c, i) => {
+      const raw = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
+      const w   = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
+      const nb  = Math.ceil(longestWordWidth(raw) + padX*2 + 2);
+      if (w  > contentW[i])         contentW[i]         = w;
+      if (nb > contentNoBreakMin[i]) contentNoBreakMin[i] = nb;
+    });
+  };
+  divisions.forEach(consider);
+  consider(totalsRow);
+
+  // Final minimum per column ensures: baseMin, header no-break, content no-break
+  const minW = tableCols.map((_, i) =>
+    Math.max(baseMin[i], headerNoBreakMin[i], contentNoBreakMin[i])
+  );
+
+  // Desired width = max(header, content, min)
+  let desired = tableCols.map((_, i) => Math.max(headerW[i], contentW[i], minW[i]));
+  const totalAvail = tableW;
+  let sum = desired.reduce((a,b)=>a+b,0);
+
+  // If wider than page: scale down, but never below minW
+  if (sum > totalAvail){
+    const over = sum - totalAvail;
+    // iterative shave from columns with most slack (desired - minW)
+    let tries = 0;
+    while (sum > totalAvail && tries < 500){
+      let idx = -1, slackMax = -1;
+      for (let i=0;i<desired.length;i++){
+        const slack = desired[i] - minW[i];
+        if (slack > slackMax){ slackMax = slack; idx = i; }
       }
-      tableCols.forEach((c,i)=> c.w = desired[i]);
+      if (idx < 0) break; // cannot shrink further without breaking words
+      desired[idx] -= 1; sum -= 1; tries++;
     }
+  }
+
+  // If narrower than page: distribute leftover (bias wider-text columns)
+  if (sum < totalAvail){
+    let leftover = totalAvail - sum;
+    const priority = new Set(['division','pinst','req','rec','inst']);
+    while (leftover > 0){
+      let advanced = false;
+      for (let i=0;i<tableCols.length && leftover>0;i++){
+        if (priority.has(tableCols[i].key)) { desired[i] += 1; leftover--; advanced = true; }
+      }
+      if (!advanced){
+        for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i] += 1; leftover--; }
+      }
+    }
+  }
+
+  // Assign back
+  tableCols.forEach((c,i)=> c.w = desired[i]);
+}
+
 
     // helpers
     function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
@@ -1315,35 +1344,75 @@ class AdvancedPOSTracker {
         g.items.forEach(it => rows2.push({ division:g.division, po:it.po, n:it.n }));
       });
 
-      // Auto widths for second table
-      const min2 = [110, 220, 80];
-      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-      const headW2 = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
-      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-      const contentW2 = cols2.map(() => 0);
-      rows2.forEach(r=>{
-        cols2.forEach((c,i)=>{
-          const raw = r._group
-            ? (c.key==='division' ? `${r.division}  —  Total: ${r.total}` : '')
-            : String(r[c.key] ?? '');
-          const w = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
-          if (w > contentW2[i]) contentW2[i] = w;
-        });
-      });
-      let desired2 = cols2.map((c,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
-      const tableW2 = pageW - margin*2;
-      let sum2 = desired2.reduce((a,b)=>a+b,0);
-      if (sum2 > tableW2){
-        const scale = tableW2 / sum2;
-        desired2 = desired2.map((w,i)=> Math.max(min2[i], Math.floor(w*scale)));
-        sum2 = desired2.reduce((a,b)=>a+b,0);
-      } else if (sum2 < tableW2){
-        let leftover = tableW2 - sum2;
-        while (leftover-- > 0) desired2[1] += 1; // widen PO col
-        sum2 = tableW2;
-      }
-      cols2.forEach((c,i)=> c.w = desired2[i]);
+      // Auto widths for second table (NO WORD BREAKING + full-width fit)
+const longestWordWidth2 = (text) => {
+  const s = (text ?? "").toString();
+  // allow visual breaks only at space, slash, hyphen — never inside a token
+  const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
+  if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
+  let w = 0;
+  for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
+  return w; // width WITHOUT padding; padding added below
+};
 
+// Sensible floors for a professional look
+const baseMin2 = [120, 240, 90]; // [Division, Post Office, Devices Today]
+
+// Measure headers at header font
+doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+const headW2  = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+const headNB2 = cols2.map(c => Math.ceil(longestWordWidth2(c.label) + padX*2 + 4));
+
+// Measure content at body font
+doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+const contentW2  = cols2.map(() => 0);
+const contentNB2 = cols2.map(() => 0);
+
+rows2.forEach(r=>{
+  cols2.forEach((c,i)=>{
+    const raw = r._group
+      ? (c.key==='division' ? `${r.division}  —  Total: ${r.total}` : '')
+      : String(r[c.key] ?? '');
+    const w  = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
+    const nb = Math.ceil(longestWordWidth2(raw) + padX*2 + 2);
+    if (w  > contentW2[i])  contentW2[i]  = w;
+    if (nb > contentNB2[i]) contentNB2[i] = nb;
+  });
+});
+
+// Final per-column minimums: never shrink below longest single word
+const min2 = cols2.map((_,i)=> Math.max(baseMin2[i], headNB2[i], contentNB2[i]));
+
+// Target widths before fitting to page
+let desired2 = cols2.map((_,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
+const tableW2 = pageW - margin*2;
+let sum2 = desired2.reduce((a,b)=>a+b,0);
+
+// If wider than page: shave from columns with slack, never below min2
+if (sum2 > tableW2){
+  let tries = 0;
+  while (sum2 > tableW2 && tries < 600){
+    let idx = -1, slackMax = -1;
+    for (let i=0;i<desired2.length;i++){
+      const slack = desired2[i] - min2[i];
+      if (slack > slackMax){ slackMax = slack; idx = i; }
+    }
+    if (idx < 0) break; // cannot shrink further without breaking words
+    desired2[idx] -= 1; sum2 -= 1; tries++;
+  }
+// If narrower: widen Post Office col first, then distribute the rest
+} else if (sum2 < tableW2){
+  let leftover = tableW2 - sum2;
+  while (leftover > 0){
+    if (leftover > 0){ desired2[1] += 1; leftover--; } // index 1 = Post Office
+    for (let i=0;i<desired2.length && leftover>0;i++){ desired2[i] += 1; leftover--; }
+  }
+}
+
+// Commit widths
+cols2.forEach((c,i)=> c.w = desired2[i]);
+
+      
       // Draw header
       const drawHeader2 = ()=>{
         ensureSpace(22);

@@ -1260,18 +1260,24 @@ function computeAutoWidths(){
       doc.rect(tableX, y, totalW, headerH, 'F');
 
       // Per-cell borders + text
-      let x = tableX;
       tableCols.forEach(c=>{
-        doc.rect(x, y, c.w, headerH, 'S');
-        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-        const startY = centerBlockY(y, headerH, lines);
-        if (c.align === 'left'){
-          doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
-        } else {
-          lines.forEach((ln,i)=> doc.text(ln, x + c.w/2, startY + i*lineH, { align:'center' }));
-        }
-        x += c.w;
-      });
+  doc.rect(x, y, c.w, headerH, 'S');
+  const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+  const startY = centerBlockY(y, headerH, lines);
+
+  if (c.key === 'division') {
+    // Left-align ONLY the "Division" header
+    doc.text(lines, x + padX, startY, { align: 'left', lineHeightFactor: 1.25 });
+  } else {
+    // Center-align all other headers
+    lines.forEach((ln, i) => {
+      doc.text(ln, x + c.w / 2, startY + i * lineH, { align: 'center' });
+    });
+  }
+
+  x += c.w;
+});
+
 
       y += headerH;
     }

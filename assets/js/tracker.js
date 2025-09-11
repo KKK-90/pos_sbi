@@ -15,6 +15,10 @@ class AdvancedPOSTracker {
     this.topFilters = { division:"", install:"", func:"", blanks:"all" }; // toolbar dropdowns
     this.docStorageKey = "advancedPOSTrackerDocs";   // localStorage key for PDF blobs
     this.uploadAllowedUsers = null;                  // null => everyone; or restrict e.g. ["NKR","SBI_DOP"]
+    this.progressSelection = new Set();   // selected row ids (on Progress tab)
+    this._progressLastIds = [];           // last rendered ids for "select all in view"
+    this._progressBarWired = false;       // event wiring guard
+  }
   }
 
   async init() {
@@ -90,7 +94,10 @@ class AdvancedPOSTracker {
     switch (tabName) {
       case "dashboard": this.updateDashboard(); break;
       case "locations": this.renderOfficeDetails(); break;   // OWD table
-      case "progress": this.displayProgress(); this.updateProgressFilters(); break;
+      case "progress":  this.displayProgress(); this.updateProgressFilters();
+                        this._ensureProgressBulkUI();          // PATCH C: add bulk bar/actions
+                        this.filterProgress();                 // render with current filters & update selection bar
+                        break;
       case "reports":
         this.generateReports();
         this._wireExportReportsPdfForm();   // PATCH A: ensure the dialog’s Generate works
@@ -190,44 +197,76 @@ class AdvancedPOSTracker {
   // ---- legacy lists / progress (frozen) ----
   filterByDivision(name){ this.showTab(null,"progress"); const sel=document.getElementById("progressDivisionFilter"); if (sel){ sel.value=name; this.filterProgressByDivision(); } }
   displayLocations(){ this.renderLocationsList(this.locations, "locationsList"); }
-  renderLocationsList(list, targetId="locationsList"){
-    const target = document.getElementById(targetId);
-    if (!list.length) {
-      target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
-        <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
-      return;
-    }
-    let html = "";
-    list.forEach(l=>{
-      const statusClass = this.getStatusClass(l.installationStatus);
-      const pct = this.calculateProgress(l);
-      html += `
-      <div class="location-card">
-        <div class="location-header">
-          <div class="location-title">${l.postOfficeName} (${l.postOfficeId})</div>
-          <div class="flex gap-10">
-            <span class="status-badge ${statusClass}">${l.installationStatus}</span>
+renderLocationsList(list, targetId="locationsList"){
+  const target = document.getElementById(targetId);
+  if (!target) return;
+
+  // PATCH C: bind one delegated listener per target container
+  if (!target._bulkBound){
+    target._bulkBound = true;
+    target.addEventListener("change", (e)=>{
+      const cb = e.target.closest('input[type="checkbox"][data-sel-id]');
+      if (!cb) return;
+      const id = parseInt(cb.getAttribute("data-sel-id"), 10);
+      if (Number.isFinite(id)){
+        if (cb.checked) this.progressSelection.add(id);
+        else this.progressSelection.delete(id);
+        this._updateProgressSelectionBar();
+      }
+    });
+  }
+
+  if (!list.length) {
+    target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
+      <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
+    return;
+  }
+
+  const isProgress = (targetId === "progressList");
+  let html = "";
+  list.forEach(l=>{
+    const statusClass = this.getStatusClass(l.installationStatus);
+    const pct = this.calculateProgress(l);
+
+    // PATCH C: selection checkbox for Progress cards only
+    const selBox = isProgress
+      ? `<label style="display:flex;align-items:center;gap:6px;">
+           <input type="checkbox" data-sel-id="${l.id}" ${this.progressSelection.has(l.id) ? "checked":""}>
+           <span style="font-size:12px;opacity:.75;">Select</span>
+         </label>`
+      : "";
+
+    html += `
+    <div class="location-card">
+      <div class="location-header">
+        <div class="location-title">${l.postOfficeName} ${l.postOfficeId ? `(${l.postOfficeId})` : ""}</div>
+        <div class="flex gap-10" style="gap:10px;align-items:center;">
+          ${selBox}
+          <span class="status-badge ${statusClass}">${l.installationStatus}</span>
+          ${!isProgress ? `
             <button class="btn btn-sm btn-primary" onclick="tracker.editLocation(${l.id})">✏️ Edit</button>
             <button class="btn btn-sm btn-danger" onclick="tracker.deleteLocation(${l.id})">🗑️ Delete</button>
-          </div>
+          ` : ""}
         </div>
-        <div class="location-details">
-          <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
-          <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
-          <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
-          <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city}, ${l.state}</div></div>
-          <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
-          <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
-        </div>
-        <div style="margin-top:20px;">
-          <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
-            <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
-          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-        </div>
-      </div>`;
-    });
-    target.innerHTML = html;
-  }
+      </div>
+      <div class="location-details">
+        <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
+        <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
+        <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
+        <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city||""}${l.state?`, ${l.state}`:""}</div></div>
+        <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
+        <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
+      </div>
+      <div style="margin-top:20px;">
+        <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
+          <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      </div>
+    </div>`;
+  });
+  target.innerHTML = html;
+}
+
   updateFilters(){
     const divisions=[...new Set(this.locations.map(l=>l.division))];
     const sel=document.getElementById("divisionFilter");
@@ -251,23 +290,215 @@ class AdvancedPOSTracker {
     const sel=document.getElementById("progressDivisionFilter");
     if (sel){ sel.innerHTML=`<option value="">All Divisions</option>`; divisions.forEach(d=> sel.innerHTML+=`<option value="${d}">${d}</option>`); }
   }
+
+// ===== PATCH C: Progress bulk actions =====
+_ensureProgressBulkUI(){
+  const host = document.querySelector('#progress');
+  if (!host) return;
+
+  // Create a slim action bar under existing filters, only once
+  let bar = document.getElementById('progress-bulk-bar');
+  if (!bar){
+    bar = document.createElement('div');
+    bar.id = 'progress-bulk-bar';
+    bar.style.display = 'flex';
+    bar.style.flexWrap = 'wrap';
+    bar.style.gap = '8px';
+    bar.style.alignItems = 'center';
+    bar.style.margin = '10px 0 14px';
+    bar.innerHTML = `
+      <span id="progress-selected-pill" class="badge" style="background:#eef3ff;color:#234; padding:6px 10px;border-radius:999px;font-size:12px;">
+        Selected: <strong id="progress-selected-count">0</strong>
+      </span>
+      <button id="progress-select-all"   class="btn btn-sm btn-secondary">Select all in view</button>
+      <button id="progress-clear-sel"    class="btn btn-sm btn-light">Clear selection</button>
+      <button id="progress-bulk-update"  class="btn btn-sm btn-primary">Bulk update</button>
+    `;
+    // place after filters if available
+    const filtersRow = host.querySelector('.filters') || host;
+    filtersRow.parentElement.insertBefore(bar, filtersRow.nextSibling);
+  }
+
+  if (!this._progressBarWired){
+    this._progressBarWired = true;
+    document.getElementById('progress-select-all')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(true));
+    document.getElementById('progress-clear-sel')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(false));
+    document.getElementById('progress-bulk-update')?.addEventListener('click', ()=> this._openBulkUpdateModal());
+  }
+
+  this._updateProgressSelectionBar();
+}
+
+_updateProgressSelectionBar(){
+  const n = this.progressSelection.size;
+  const pill = document.getElementById('progress-selected-count');
+  if (pill) pill.textContent = String(n);
+}
+
+_toggleProgressSelectAllCurrent(select=true){
+  (this._progressLastIds || []).forEach(id => {
+    if (select) this.progressSelection.add(id); else this.progressSelection.delete(id);
+  });
+  this.filterProgress(); // re-render to reflect checkbox states & update count
+}
+
+_clearProgressSelection(){
+  this.progressSelection.clear();
+  this.filterProgress();
+}
+
+_openBulkUpdateModal(){
+  if (this.progressSelection.size === 0){
+    alert('Select at least one Post Office in the list to bulk update.');
+    return;
+  }
+  const id = 'bulk-update-overlay';
+  if (document.getElementById(id)) return;
+
+  const today = new Date().toISOString().slice(0,10);
+  const modal = document.createElement('div');
+  modal.id = id;
+  modal.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2500;display:flex;align-items:center;justify-content:center;">
+      <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:520px;max-width:90vw;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+        <h3 style="margin:0 0 6px;font-size:16px;color:#2c3e50;">Bulk update (${this.progressSelection.size} selected)</h3>
+        <p style="margin:0 0 12px;font-size:12.5px;opacity:.8;">Leave a field blank to keep its current value.</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Installation status</span>
+            <select id="bulk-install" class="filter-select" style="padding:7px 8px;">
+              <option value="">(keep)</option>
+              <option>Pending</option>
+              <option>Device Received</option>
+              <option>In Progress</option>
+              <option>Completed</option>
+            </select>
+          </label>
+
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Functionality status</span>
+            <select id="bulk-func" class="filter-select" style="padding:7px 8px;">
+              <option value="">(keep)</option>
+              <option>Not Tested</option>
+              <option>Working</option>
+              <option>Not Working</option>
+            </select>
+          </label>
+
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Date of receipt of device</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="bulk-date" type="date" style="flex:1;padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              <button id="bulk-set-today" class="btn btn-sm btn-light" type="button">Today</button>
+            </div>
+          </label>
+
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>No. of devices received</span>
+            <input id="bulk-devices" type="number" min="0" step="1" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+          </label>
+
+          <label style="grid-column:1 / -1; display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Issues (if any)</span>
+            <input id="bulk-issues" type="text" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+            <div style="display:flex;gap:10px;align-items:center;margin-top:4px;">
+              <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;">
+                <input id="bulk-clear-issues" type="checkbox"> <span>Set to “None”</span>
+              </label>
+            </div>
+          </label>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+          <button id="bulk-cancel" class="btn btn-sm btn-secondary">Cancel</button>
+          <button id="bulk-apply"  class="btn btn-sm btn-primary">Apply</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#bulk-set-today')?.addEventListener('click', ()=>{
+    const el = modal.querySelector('#bulk-date'); if (el) el.value = today;
+  });
+  modal.querySelector('#bulk-cancel')?.addEventListener('click', ()=> modal.remove());
+  modal.querySelector('#bulk-apply')?.addEventListener('click', ()=>{
+    const payload = {
+      installationStatus: modal.querySelector('#bulk-install')?.value || "",
+      functionalityStatus: modal.querySelector('#bulk-func')?.value || "",
+      dateOfReceiptOfDevice: modal.querySelector('#bulk-date')?.value || "",
+      noOfDevicesReceived: modal.querySelector('#bulk-devices')?.value || "",
+      issuesIfAny: modal.querySelector('#bulk-clear-issues')?.checked ? "None" : (modal.querySelector('#bulk-issues')?.value || "")
+    };
+    modal.remove();
+    this._applyBulkUpdate(payload);
+  });
+}
+
+_applyBulkUpdate(payload){
+  // normalize & apply only provided fields
+  const has = (v)=> v !== null && v !== undefined && String(v).trim() !== "";
+  let changed = 0;
+
+  const toInt = (v)=> {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const updates = {
+    installationStatus: has(payload.installationStatus) ? String(payload.installationStatus) : null,
+    functionalityStatus: has(payload.functionalityStatus) ? String(payload.functionalityStatus) : null,
+    dateOfReceiptOfDevice: has(payload.dateOfReceiptOfDevice) ? String(payload.dateOfReceiptOfDevice) : null,
+    noOfDevicesReceived: has(payload.noOfDevicesReceived) ? toInt(payload.noOfDevicesReceived) : null,
+    issuesIfAny: (payload.issuesIfAny === "None") ? "None" : (has(payload.issuesIfAny) ? String(payload.issuesIfAny) : null)
+  };
+
+  const selected = new Set(this.progressSelection);
+  if (!selected.size) { alert("Selection cleared. Nothing to update."); return; }
+
+  this.locations = this.locations.map(l=>{
+    if (!selected.has(l.id)) return l;
+    const next = { ...l };
+    if (updates.installationStatus !== null) next.installationStatus = updates.installationStatus;
+    if (updates.functionalityStatus !== null) next.functionalityStatus = updates.functionalityStatus;
+    if (updates.dateOfReceiptOfDevice !== null) next.dateOfReceiptOfDevice = updates.dateOfReceiptOfDevice;
+    if (updates.noOfDevicesReceived !== null) next.noOfDevicesReceived = updates.noOfDevicesReceived;
+    if (updates.issuesIfAny !== null) next.issuesIfAny = updates.issuesIfAny;
+    changed++;
+    return next;
+  });
+
+  this.saveToStorage();
+  this.updateDashboard();
+  this.filterProgress(); // re-render and refresh selection bar
+  alert(`Updated ${changed} record(s) successfully.`);
+}
+
+
   filterProgressByDivision(){
     const d=document.getElementById("progressDivisionFilter").value;
     const list = d ? this.locations.filter(l=>l.division===d) : this.locations;
     this.renderLocationsList(list,"progressList");
   }
-  filterProgress(){
-    const term=(document.getElementById("progressSearchInput").value||"").toLowerCase();
-    const status=document.getElementById("progressStatusFilter").value;
-    const div=document.getElementById("progressDivisionFilter").value;
-    const filtered=this.locations.filter(l=>{
-      const matchesSearch = [l.postOfficeName,l.division].some(v=> (v||"").toLowerCase().includes(term));
-      const matchesStatus = !status || l.installationStatus===status;
-      const matchesDivision = !div || l.division===div;
-      return matchesSearch && matchesStatus && matchesDivision;
-    });
-    this.renderLocationsList(filtered,"progressList");
-  }
+filterProgress(){
+  const term=(document.getElementById("progressSearchInput").value||"").toLowerCase();
+  const status=document.getElementById("progressStatusFilter").value;
+  const div=document.getElementById("progressDivisionFilter").value;
+  const filtered=this.locations.filter(l=>{
+    const matchesSearch = [l.postOfficeName,l.division].some(v=> (v||"").toLowerCase().includes(term));
+    const matchesStatus = !status || l.installationStatus===status;
+    const matchesDivision = !div || l.division===div;
+    return matchesSearch && matchesStatus && matchesDivision;
+  });
+
+  // PATCH C: remember what’s in view (for “Select all in view”)
+  this._progressLastIds = filtered.map(l => l.id);
+
+  this.renderLocationsList(filtered,"progressList");
+  this._updateProgressSelectionBar(); // PATCH C: refresh selected count
+}
+
 
   // ---- reports (frozen UI; PDF enhanced below) ----
   generateReports(){

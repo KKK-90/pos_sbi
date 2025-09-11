@@ -15,10 +15,14 @@ class AdvancedPOSTracker {
     this.topFilters = { division:"", install:"", func:"", blanks:"all" }; // toolbar dropdowns
     this.docStorageKey = "advancedPOSTrackerDocs";   // localStorage key for PDF blobs
     this.uploadAllowedUsers = null;                  // null => everyone; or restrict e.g. ["NKR","SBI_DOP"]
+
+    // --- Progress (bulk update) ---
     this.progressSelection = new Set();   // selected row ids (on Progress tab)
     this._progressLastIds = [];           // last rendered ids for "select all in view"
     this._progressBarWired = false;       // event wiring guard
-  }
+
+    // PDF dialog wiring guard
+    this._pdfDialogWired = false;
   }
 
   async init() {
@@ -94,15 +98,19 @@ class AdvancedPOSTracker {
     switch (tabName) {
       case "dashboard": this.updateDashboard(); break;
       case "locations": this.renderOfficeDetails(); break;   // OWD table
-      case "progress":  this.displayProgress(); this.updateProgressFilters();
-                        this._ensureProgressBulkUI();          // PATCH C: add bulk bar/actions
-                        this.filterProgress();                 // render with current filters & update selection bar
-                        break;
+      case "progress":
+        this.displayProgress();
+        this.updateProgressFilters();
+        this._ensureProgressBulkUI();          // bulk bar/actions
+        this.filterProgress();                 // render with filters & update selection bar
+        break;
       case "reports":
         this.generateReports();
-        this._wireExportReportsPdfForm();   // PATCH A: ensure the dialog’s Generate works
+        this._wireExportReportsPdfForm();      // ensure the dialog’s Generate works
         break;
-      case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
+      case "data-management":
+        this.updateDataStatistics && this.updateDataStatistics();
+        break;
     }
   }
 
@@ -171,7 +179,7 @@ class AdvancedPOSTracker {
         <p>Start by importing Excel data or adding locations.</p>
         <div style="margin-top:15px;">
           <button class="btn btn-primary" onclick="tracker.showTab(null,'data-management')">📊 Manage Data</button>
-          <button class="btn btn-success" onclick="showLocationForm()">➕ Add Location</button>
+          <button class="btn btn-success" onclick="tracker.showLocationForm()">➕ Add Location</button>
         </div></div>`;
       return;
     }
@@ -197,76 +205,74 @@ class AdvancedPOSTracker {
   // ---- legacy lists / progress (frozen) ----
   filterByDivision(name){ this.showTab(null,"progress"); const sel=document.getElementById("progressDivisionFilter"); if (sel){ sel.value=name; this.filterProgressByDivision(); } }
   displayLocations(){ this.renderLocationsList(this.locations, "locationsList"); }
-renderLocationsList(list, targetId="locationsList"){
-  const target = document.getElementById(targetId);
-  if (!target) return;
+  renderLocationsList(list, targetId="locationsList"){
+    const target = document.getElementById(targetId);
+    if (!target) return;
 
-  // PATCH C: bind one delegated listener per target container
-  if (!target._bulkBound){
-    target._bulkBound = true;
-    target.addEventListener("change", (e)=>{
-      const cb = e.target.closest('input[type="checkbox"][data-sel-id]');
-      if (!cb) return;
-      const id = parseInt(cb.getAttribute("data-sel-id"), 10);
-      if (Number.isFinite(id)){
-        if (cb.checked) this.progressSelection.add(id);
-        else this.progressSelection.delete(id);
-        this._updateProgressSelectionBar();
-      }
-    });
-  }
+    // bind one delegated listener per target container
+    if (!target._bulkBound){
+      target._bulkBound = true;
+      target.addEventListener("change", (e)=>{
+        const cb = e.target.closest('input[type="checkbox"][data-sel-id]');
+        if (!cb) return;
+        const id = parseInt(cb.getAttribute("data-sel-id"), 10);
+        if (Number.isFinite(id)){
+          if (cb.checked) this.progressSelection.add(id);
+          else this.progressSelection.delete(id);
+          this._updateProgressSelectionBar();
+        }
+      });
+    }
 
-  if (!list.length) {
-    target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
-      <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
-    return;
-  }
+    if (!list.length) {
+      target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
+        <button class="btn btn-primary" onclick="tracker.showLocationForm()">Add Post Office(s)</button></div>`;
+      return;
+    }
 
-  const isProgress = (targetId === "progressList");
-  let html = "";
-  list.forEach(l=>{
-    const statusClass = this.getStatusClass(l.installationStatus);
-    const pct = this.calculateProgress(l);
+    const isProgress = (targetId === "progressList");
+    let html = "";
+    list.forEach(l=>{
+      const statusClass = this.getStatusClass(l.installationStatus);
+      const pct = this.calculateProgress(l);
 
-    // PATCH C: selection checkbox for Progress cards only
-    const selBox = isProgress
-      ? `<label style="display:flex;align-items:center;gap:6px;">
-           <input type="checkbox" data-sel-id="${l.id}" ${this.progressSelection.has(l.id) ? "checked":""}>
-           <span style="font-size:12px;opacity:.75;">Select</span>
-         </label>`
-      : "";
+      const selBox = isProgress
+        ? `<label style="display:flex;align-items:center;gap:6px;">
+             <input type="checkbox" data-sel-id="${l.id}" ${this.progressSelection.has(l.id) ? "checked":""}>
+             <span style="font-size:12px;opacity:.75;">Select</span>
+           </label>`
+        : "";
 
-    html += `
-    <div class="location-card">
-      <div class="location-header">
-        <div class="location-title">${l.postOfficeName} ${l.postOfficeId ? `(${l.postOfficeId})` : ""}</div>
-        <div class="flex gap-10" style="gap:10px;align-items:center;">
-          ${selBox}
-          <span class="status-badge ${statusClass}">${l.installationStatus}</span>
-          ${!isProgress ? `
-            <button class="btn btn-sm btn-primary" onclick="tracker.editLocation(${l.id})">✏️ Edit</button>
-            <button class="btn btn-sm btn-danger" onclick="tracker.deleteLocation(${l.id})">🗑️ Delete</button>
-          ` : ""}
+      html += `
+      <div class="location-card">
+        <div class="location-header">
+          <div class="location-title">${l.postOfficeName} ${l.postOfficeId ? `(${l.postOfficeId})` : ""}</div>
+          <div class="flex gap-10" style="gap:10px;align-items:center;">
+            ${selBox}
+            <span class="status-badge ${statusClass}">${l.installationStatus}</span>
+            ${!isProgress ? `
+              <button class="btn btn-sm btn-primary" onclick="tracker.editLocation(${l.id})">✏️ Edit</button>
+              <button class="btn btn-sm btn-danger" onclick="tracker.deleteLocation(${l.id})">🗑️ Delete</button>
+            ` : ""}
+          </div>
         </div>
-      </div>
-      <div class="location-details">
-        <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
-        <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
-        <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
-        <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city||""}${l.state?`, ${l.state}`:""}</div></div>
-        <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
-        <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
-      </div>
-      <div style="margin-top:20px;">
-        <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
-          <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
-        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-      </div>
-    </div>`;
-  });
-  target.innerHTML = html;
-}
-
+        <div class="location-details">
+          <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
+          <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
+          <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
+          <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city||""}${l.state?`, ${l.state}`:""}</div></div>
+          <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
+          <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
+        </div>
+        <div style="margin-top:20px;">
+          <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
+            <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>
+      </div>`;
+    });
+    target.innerHTML = html;
+  }
   updateFilters(){
     const divisions=[...new Set(this.locations.map(l=>l.division))];
     const sel=document.getElementById("divisionFilter");
@@ -291,214 +297,203 @@ renderLocationsList(list, targetId="locationsList"){
     if (sel){ sel.innerHTML=`<option value="">All Divisions</option>`; divisions.forEach(d=> sel.innerHTML+=`<option value="${d}">${d}</option>`); }
   }
 
-// ===== PATCH C: Progress bulk actions =====
-_ensureProgressBulkUI(){
-  const host = document.querySelector('#progress');
-  if (!host) return;
+  // ===== Progress bulk actions =====
+  _ensureProgressBulkUI(){
+    const host = document.querySelector('#progress');
+    if (!host) return;
 
-  // Create a slim action bar under existing filters, only once
-  let bar = document.getElementById('progress-bulk-bar');
-  if (!bar){
-    bar = document.createElement('div');
-    bar.id = 'progress-bulk-bar';
-    bar.style.display = 'flex';
-    bar.style.flexWrap = 'wrap';
-    bar.style.gap = '8px';
-    bar.style.alignItems = 'center';
-    bar.style.margin = '10px 0 14px';
-    bar.innerHTML = `
-      <span id="progress-selected-pill" class="badge" style="background:#eef3ff;color:#234; padding:6px 10px;border-radius:999px;font-size:12px;">
-        Selected: <strong id="progress-selected-count">0</strong>
-      </span>
-      <button id="progress-select-all"   class="btn btn-sm btn-secondary">Select all in view</button>
-      <button id="progress-clear-sel"    class="btn btn-sm btn-light">Clear selection</button>
-      <button id="progress-bulk-update"  class="btn btn-sm btn-primary">Bulk update</button>
-    `;
-    // place after filters if available
-    const filtersRow = host.querySelector('.filters') || host;
-    filtersRow.parentElement.insertBefore(bar, filtersRow.nextSibling);
+    let bar = document.getElementById('progress-bulk-bar');
+    if (!bar){
+      bar = document.createElement('div');
+      bar.id = 'progress-bulk-bar';
+      bar.style.display = 'flex';
+      bar.style.flexWrap = 'wrap';
+      bar.style.gap = '8px';
+      bar.style.alignItems = 'center';
+      bar.style.margin = '10px 0 14px';
+      bar.innerHTML = `
+        <span id="progress-selected-pill" class="badge" style="background:#eef3ff;color:#234; padding:6px 10px;border-radius:999px;font-size:12px;">
+          Selected: <strong id="progress-selected-count">0</strong>
+        </span>
+        <button id="progress-select-all"   class="btn btn-sm btn-secondary">Select all in view</button>
+        <button id="progress-clear-sel"    class="btn btn-sm btn-light">Clear selection</button>
+        <button id="progress-bulk-update"  class="btn btn-sm btn-primary">Bulk update</button>
+      `;
+      const filtersRow = host.querySelector('.filters') || host;
+      filtersRow.parentElement.insertBefore(bar, filtersRow.nextSibling);
+    }
+
+    if (!this._progressBarWired){
+      this._progressBarWired = true;
+      document.getElementById('progress-select-all')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(true));
+      document.getElementById('progress-clear-sel')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(false));
+      document.getElementById('progress-bulk-update')?.addEventListener('click', ()=> this._openBulkUpdateModal());
+    }
+
+    this._updateProgressSelectionBar();
   }
-
-  if (!this._progressBarWired){
-    this._progressBarWired = true;
-    document.getElementById('progress-select-all')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(true));
-    document.getElementById('progress-clear-sel')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(false));
-    document.getElementById('progress-bulk-update')?.addEventListener('click', ()=> this._openBulkUpdateModal());
+  _updateProgressSelectionBar(){
+    const n = this.progressSelection.size;
+    const pill = document.getElementById('progress-selected-count');
+    if (pill) pill.textContent = String(n);
   }
-
-  this._updateProgressSelectionBar();
-}
-
-_updateProgressSelectionBar(){
-  const n = this.progressSelection.size;
-  const pill = document.getElementById('progress-selected-count');
-  if (pill) pill.textContent = String(n);
-}
-
-_toggleProgressSelectAllCurrent(select=true){
-  (this._progressLastIds || []).forEach(id => {
-    if (select) this.progressSelection.add(id); else this.progressSelection.delete(id);
-  });
-  this.filterProgress(); // re-render to reflect checkbox states & update count
-}
-
-_clearProgressSelection(){
-  this.progressSelection.clear();
-  this.filterProgress();
-}
-
-_openBulkUpdateModal(){
-  if (this.progressSelection.size === 0){
-    alert('Select at least one Post Office in the list to bulk update.');
-    return;
+  _toggleProgressSelectAllCurrent(select=true){
+    (this._progressLastIds || []).forEach(id => {
+      if (select) this.progressSelection.add(id); else this.progressSelection.delete(id);
+    });
+    this.filterProgress(); // re-render to reflect checkbox states & update count
   }
-  const id = 'bulk-update-overlay';
-  if (document.getElementById(id)) return;
+  _clearProgressSelection(){
+    this.progressSelection.clear();
+    this.filterProgress();
+  }
+  _openBulkUpdateModal(){
+    if (this.progressSelection.size === 0){
+      alert('Select at least one Post Office in the list to bulk update.');
+      return;
+    }
+    const id = 'bulk-update-overlay';
+    if (document.getElementById(id)) return;
 
-  const today = new Date().toISOString().slice(0,10);
-  const modal = document.createElement('div');
-  modal.id = id;
-  modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2500;display:flex;align-items:center;justify-content:center;">
-      <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:520px;max-width:90vw;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
-        <h3 style="margin:0 0 6px;font-size:16px;color:#2c3e50;">Bulk update (${this.progressSelection.size} selected)</h3>
-        <p style="margin:0 0 12px;font-size:12.5px;opacity:.8;">Leave a field blank to keep its current value.</p>
+    const today = new Date().toISOString().slice(0,10);
+    const modal = document.createElement('div');
+    modal.id = id;
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2500;display:flex;align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:520px;max-width:90vw;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+          <h3 style="margin:0 0 6px;font-size:16px;color:#2c3e50;">Bulk update (${this.progressSelection.size} selected)</h3>
+          <p style="margin:0 0 12px;font-size:12.5px;opacity:.8;">Leave a field blank to keep its current value.</p>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-            <span>Installation status</span>
-            <select id="bulk-install" class="filter-select" style="padding:7px 8px;">
-              <option value="">(keep)</option>
-              <option>Pending</option>
-              <option>Device Received</option>
-              <option>In Progress</option>
-              <option>Completed</option>
-            </select>
-          </label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+              <span>Installation status</span>
+              <select id="bulk-install" class="filter-select" style="padding:7px 8px;">
+                <option value="">(keep)</option>
+                <option>Pending</option>
+                <option>Device Received</option>
+                <option>In Progress</option>
+                <option>Completed</option>
+              </select>
+            </label>
 
-          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-            <span>Functionality status</span>
-            <select id="bulk-func" class="filter-select" style="padding:7px 8px;">
-              <option value="">(keep)</option>
-              <option>Not Tested</option>
-              <option>Working</option>
-              <option>Not Working</option>
-            </select>
-          </label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+              <span>Functionality status</span>
+              <select id="bulk-func" class="filter-select" style="padding:7px 8px;">
+                <option value="">(keep)</option>
+                <option>Not Tested</option>
+                <option>Working</option>
+                <option>Not Working</option>
+              </select>
+            </label>
 
-          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-            <span>Date of receipt of device</span>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <input id="bulk-date" type="date" style="flex:1;padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
-              <button id="bulk-set-today" class="btn btn-sm btn-light" type="button">Today</button>
-            </div>
-          </label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+              <span>Date of receipt of device</span>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input id="bulk-date" type="date" style="flex:1;padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+                <button id="bulk-set-today" class="btn btn-sm btn-light" type="button">Today</button>
+              </div>
+            </label>
 
-          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-            <span>No. of devices received</span>
-            <input id="bulk-devices" type="number" min="0" step="1" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
-          </label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+              <span>No. of devices received</span>
+              <input id="bulk-devices" type="number" min="0" step="1" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+            </label>
 
-          <label style="grid-column:1 / -1; display:flex;flex-direction:column;gap:6px;font-size:13px;">
-            <span>Issues (if any)</span>
-            <input id="bulk-issues" type="text" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
-            <div style="display:flex;gap:10px;align-items:center;margin-top:4px;">
-              <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;">
-                <input id="bulk-clear-issues" type="checkbox"> <span>Set to “None”</span>
-              </label>
-            </div>
-          </label>
-        </div>
+            <label style="grid-column:1 / -1; display:flex;flex-direction:column;gap:6px;font-size:13px;">
+              <span>Issues (if any)</span>
+              <input id="bulk-issues" type="text" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              <div style="display:flex;gap:10px;align-items:center;margin-top:4px;">
+                <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;">
+                  <input id="bulk-clear-issues" type="checkbox"> <span>Set to “None”</span>
+                </label>
+              </div>
+            </label>
+          </div>
 
-        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
-          <button id="bulk-cancel" class="btn btn-sm btn-secondary">Cancel</button>
-          <button id="bulk-apply"  class="btn btn-sm btn-primary">Apply</button>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+            <button id="bulk-cancel" class="btn btn-sm btn-secondary">Cancel</button>
+            <button id="bulk-apply"  class="btn btn-sm btn-primary">Apply</button>
+          </div>
         </div>
       </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
+    `;
+    document.body.appendChild(modal);
 
-  modal.querySelector('#bulk-set-today')?.addEventListener('click', ()=>{
-    const el = modal.querySelector('#bulk-date'); if (el) el.value = today;
-  });
-  modal.querySelector('#bulk-cancel')?.addEventListener('click', ()=> modal.remove());
-  modal.querySelector('#bulk-apply')?.addEventListener('click', ()=>{
-    const payload = {
-      installationStatus: modal.querySelector('#bulk-install')?.value || "",
-      functionalityStatus: modal.querySelector('#bulk-func')?.value || "",
-      dateOfReceiptOfDevice: modal.querySelector('#bulk-date')?.value || "",
-      noOfDevicesReceived: modal.querySelector('#bulk-devices')?.value || "",
-      issuesIfAny: modal.querySelector('#bulk-clear-issues')?.checked ? "None" : (modal.querySelector('#bulk-issues')?.value || "")
+    modal.querySelector('#bulk-set-today')?.addEventListener('click', ()=>{
+      const el = modal.querySelector('#bulk-date'); if (el) el.value = today;
+    });
+    modal.querySelector('#bulk-cancel')?.addEventListener('click', ()=> modal.remove());
+    modal.querySelector('#bulk-apply')?.addEventListener('click', ()=>{
+      const payload = {
+        installationStatus: modal.querySelector('#bulk-install')?.value || "",
+        functionalityStatus: modal.querySelector('#bulk-func')?.value || "",
+        dateOfReceiptOfDevice: modal.querySelector('#bulk-date')?.value || "",
+        noOfDevicesReceived: modal.querySelector('#bulk-devices')?.value || "",
+        issuesIfAny: modal.querySelector('#bulk-clear-issues')?.checked ? "None" : (modal.querySelector('#bulk-issues')?.value || "")
+      };
+      modal.remove();
+      this._applyBulkUpdate(payload);
+    });
+  }
+  _applyBulkUpdate(payload){
+    const has = (v)=> v !== null && v !== undefined && String(v).trim() !== "";
+    let changed = 0;
+
+    const toInt = (v)=> {
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : null;
     };
-    modal.remove();
-    this._applyBulkUpdate(payload);
-  });
-}
 
-_applyBulkUpdate(payload){
-  // normalize & apply only provided fields
-  const has = (v)=> v !== null && v !== undefined && String(v).trim() !== "";
-  let changed = 0;
+    const updates = {
+      installationStatus: has(payload.installationStatus) ? String(payload.installationStatus) : null,
+      functionalityStatus: has(payload.functionalityStatus) ? String(payload.functionalityStatus) : null,
+      dateOfReceiptOfDevice: has(payload.dateOfReceiptOfDevice) ? String(payload.dateOfReceiptOfDevice) : null,
+      noOfDevicesReceived: has(payload.noOfDevicesReceived) ? toInt(payload.noOfDevicesReceived) : null,
+      issuesIfAny: (payload.issuesIfAny === "None") ? "None" : (has(payload.issuesIfAny) ? String(payload.issuesIfAny) : null)
+    };
 
-  const toInt = (v)=> {
-    const n = parseInt(v, 10);
-    return Number.isFinite(n) ? n : null;
-  };
+    const selected = new Set(this.progressSelection);
+    if (!selected.size) { alert("Selection cleared. Nothing to update."); return; }
 
-  const updates = {
-    installationStatus: has(payload.installationStatus) ? String(payload.installationStatus) : null,
-    functionalityStatus: has(payload.functionalityStatus) ? String(payload.functionalityStatus) : null,
-    dateOfReceiptOfDevice: has(payload.dateOfReceiptOfDevice) ? String(payload.dateOfReceiptOfDevice) : null,
-    noOfDevicesReceived: has(payload.noOfDevicesReceived) ? toInt(payload.noOfDevicesReceived) : null,
-    issuesIfAny: (payload.issuesIfAny === "None") ? "None" : (has(payload.issuesIfAny) ? String(payload.issuesIfAny) : null)
-  };
+    this.locations = this.locations.map(l=>{
+      if (!selected.has(l.id)) return l;
+      const next = { ...l };
+      if (updates.installationStatus !== null) next.installationStatus = updates.installationStatus;
+      if (updates.functionalityStatus !== null) next.functionalityStatus = updates.functionalityStatus;
+      if (updates.dateOfReceiptOfDevice !== null) next.dateOfReceiptOfDevice = updates.dateOfReceiptOfDevice;
+      if (updates.noOfDevicesReceived !== null) next.noOfDevicesReceived = updates.noOfDevicesReceived;
+      if (updates.issuesIfAny !== null) next.issuesIfAny = updates.issuesIfAny;
+      changed++;
+      return next;
+    });
 
-  const selected = new Set(this.progressSelection);
-  if (!selected.size) { alert("Selection cleared. Nothing to update."); return; }
-
-  this.locations = this.locations.map(l=>{
-    if (!selected.has(l.id)) return l;
-    const next = { ...l };
-    if (updates.installationStatus !== null) next.installationStatus = updates.installationStatus;
-    if (updates.functionalityStatus !== null) next.functionalityStatus = updates.functionalityStatus;
-    if (updates.dateOfReceiptOfDevice !== null) next.dateOfReceiptOfDevice = updates.dateOfReceiptOfDevice;
-    if (updates.noOfDevicesReceived !== null) next.noOfDevicesReceived = updates.noOfDevicesReceived;
-    if (updates.issuesIfAny !== null) next.issuesIfAny = updates.issuesIfAny;
-    changed++;
-    return next;
-  });
-
-  this.saveToStorage();
-  this.updateDashboard();
-  this.filterProgress(); // re-render and refresh selection bar
-  alert(`Updated ${changed} record(s) successfully.`);
-}
-
-
+    this.saveToStorage();
+    this.updateDashboard();
+    this.filterProgress(); // re-render and refresh selection bar
+    alert(`Updated ${changed} record(s) successfully.`);
+  }
   filterProgressByDivision(){
     const d=document.getElementById("progressDivisionFilter").value;
     const list = d ? this.locations.filter(l=>l.division===d) : this.locations;
     this.renderLocationsList(list,"progressList");
   }
-filterProgress(){
-  const term=(document.getElementById("progressSearchInput").value||"").toLowerCase();
-  const status=document.getElementById("progressStatusFilter").value;
-  const div=document.getElementById("progressDivisionFilter").value;
-  const filtered=this.locations.filter(l=>{
-    const matchesSearch = [l.postOfficeName,l.division].some(v=> (v||"").toLowerCase().includes(term));
-    const matchesStatus = !status || l.installationStatus===status;
-    const matchesDivision = !div || l.division===div;
-    return matchesSearch && matchesStatus && matchesDivision;
-  });
+  filterProgress(){
+    const term=(document.getElementById("progressSearchInput").value||"").toLowerCase();
+    const status=document.getElementById("progressStatusFilter").value;
+    const div=document.getElementById("progressDivisionFilter").value;
+    const filtered=this.locations.filter(l=>{
+      const matchesSearch = [l.postOfficeName,l.division].some(v=> (v||"").toLowerCase().includes(term));
+      const matchesStatus = !status || l.installationStatus===status;
+      const matchesDivision = !div || l.division===div;
+      return matchesSearch && matchesStatus && matchesDivision;
+    });
 
-  // PATCH C: remember what’s in view (for “Select all in view”)
-  this._progressLastIds = filtered.map(l => l.id);
+    // remember what’s in view (for “Select all in view”)
+    this._progressLastIds = filtered.map(l => l.id);
 
-  this.renderLocationsList(filtered,"progressList");
-  this._updateProgressSelectionBar(); // PATCH C: refresh selected count
-}
-
+    this.renderLocationsList(filtered,"progressList");
+    this._updateProgressSelectionBar(); // refresh selected count
+  }
 
   // ---- reports (frozen UI; PDF enhanced below) ----
   generateReports(){
@@ -651,7 +646,8 @@ filterProgress(){
       `;
     }
 
-    host.innerHTML = summaryHTML + divisionsHTML + issuesHTML;
+    const hostHTML = summaryHTML + divisionsHTML + issuesHTML;
+    host.innerHTML = hostHTML;
   }
 
   // ===== Office wise details (table view) =====
@@ -754,7 +750,6 @@ filterProgress(){
   }
 
   _owdColumns(){
-    // Order and names remain as existing Excel/template + extra columns; header wording unchanged
     return [
       { key:'slNo',                      label:'Sl.No.' },
       { key:'division',                  label:'Division' },
@@ -869,12 +864,10 @@ filterProgress(){
       box.style.display = "flex";
       box.style.flexWrap = "wrap";
       box.style.gap = "8px";
-      // place next to the search field
       const parent = search.parentElement || search.closest(".filters") || document.querySelector("#locations .filters") || document.body;
       parent.appendChild(box);
     }
 
-    // helper to create select
     const makeSelect = (id, label) => {
       let sel = document.getElementById(id);
       if (!sel){
@@ -884,7 +877,6 @@ filterProgress(){
         sel.style.minWidth = "170px";
         sel.setAttribute("aria-label", label);
         sel.addEventListener("change", ()=>{
-          // update state
           if (id==="owd-dd-division") this.topFilters.division = sel.value;
           if (id==="owd-dd-install")  this.topFilters.install  = sel.value;
           if (id==="owd-dd-func")     this.topFilters.func     = sel.value;
@@ -896,25 +888,21 @@ filterProgress(){
       return sel;
     };
 
-    // Division
     const divisions = Array.from(new Set((this.locations||[]).map(l=>l.division).filter(Boolean))).sort();
     const sDiv = makeSelect("owd-dd-division","Division");
     sDiv.innerHTML = `<option value="">All Divisions</option>${divisions.map(d=>`<option value="${this._escape(d)}">${this._escape(d)}</option>`).join("")}`;
     sDiv.value = this.topFilters.division;
 
-    // Installation status
     const insts = Array.from(new Set((this.locations||[]).map(l=>l.installationStatus).filter(Boolean))).sort();
     const sIns = makeSelect("owd-dd-install","Installation status");
     sIns.innerHTML = `<option value="">All Installation status</option>${insts.map(s=>`<option value="${this._escape(s)}">${this._escape(s)}</option>`).join("")}`;
     sIns.value = this.topFilters.install;
 
-    // Functionality status
     const funcs = Array.from(new Set((this.locations||[]).map(l=>l.functionalityStatus).filter(Boolean))).sort();
     const sFun = makeSelect("owd-dd-func","Functionality status");
     sFun.innerHTML = `<option value="">All Functionality status</option>${funcs.map(s=>`<option value="${this._escape(s)}">${this._escape(s)}</option>`).join("")}`;
     sFun.value = this.topFilters.func;
 
-    // Blank fields dropdown
     const sBlank = makeSelect("owd-dd-blanks","Blank fields");
     sBlank.innerHTML = `
       <option value="all">All rows</option>
@@ -928,18 +916,15 @@ filterProgress(){
     const wrap = table.closest(".table-scroll") || table.parentElement;
     if (!wrap) return;
 
-    // Make top scroller once
     let top = document.getElementById("owd-hscroll-top");
     if (!top){
       top = document.createElement("div");
       top.id = "owd-hscroll-top";
       top.className = "owd-hscroll";
       top.innerHTML = `<div class="owd-hscroll-inner"></div>`;
-      // insert above the table wrapper
       wrap.parentElement.insertBefore(top, wrap);
     }
 
-    // Size the fake inner to table width
     const inner = top.querySelector(".owd-hscroll-inner");
     const syncWidth = () => { inner.style.width = table.scrollWidth + "px"; };
     syncWidth();
@@ -948,7 +933,6 @@ filterProgress(){
       this._owdResizeObs.observe(table);
     }
 
-    // Sync scroll positions (both ways)
     const sync = (src, dst) => {
       let ticking = false;
       src.addEventListener("scroll", ()=>{
@@ -1001,7 +985,7 @@ filterProgress(){
     document.head.appendChild(style);
   }
 
-  // ---- Documents (PDF) storage & cell UI (unchanged) ----
+  // ---- Documents (PDF) storage & cell UI ----
   _docCellHTML(loc){
     const id = loc.id;
     const list = this._loadDocs()[id] || [];
@@ -1016,7 +1000,6 @@ filterProgress(){
       : "";
     return `<div class="doc-actions">${links || '<span style="opacity:.6">—</span>'}${uploadBtn ? '&nbsp;'+uploadBtn : ''}</div>`;
   }
-
   _handleDocUpload(id, file){
     if (!file || file.type !== "application/pdf"){ alert("Please select a PDF file."); return; }
     const fr = new FileReader();
@@ -1028,7 +1011,6 @@ filterProgress(){
     };
     fr.readAsDataURL(file);
   }
-
   _loadDocs(){
     try{ return JSON.parse(localStorage.getItem(this.docStorageKey) || "{}"); }catch{ return {}; }
   }
@@ -1037,11 +1019,11 @@ filterProgress(){
     return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
   }
 
-  // ---- PDF + CRUD + Import/Export + Backup (all frozen below) ----
+  // ---- PDF + CRUD + Import/Export + Backup ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // ===== PATCH B: Wire the Reports → Export PDF dialog "Generate" button =====
+  // ===== Wire the Reports → Export PDF dialog "Generate" button =====
   _wireExportReportsPdfForm(){
     if (this._pdfDialogWired) return;
     this._pdfDialogWired = true;
@@ -1069,7 +1051,6 @@ filterProgress(){
 
     // Delegated click for the dialog's Generate button
     document.addEventListener('click', (e)=>{
-      // Accept several selectors and a fallback by button text "Generate"
       let btn = e.target.closest('#pdf-orient-generate, [data-export-pdf-generate], .export-pdf-generate-btn');
       if (!btn){
         const maybe = e.target.closest('button');
@@ -1080,14 +1061,12 @@ filterProgress(){
 
       const dlg = btn.closest('.modal, [role="dialog"], #pdf-orient-overlay') || document;
 
-      // Orientation (prefer explicit group, otherwise any radio with these values)
       const orientation =
         (dlg.querySelector('input[name="pdf-orient"]:checked')?.value) ||
         (dlg.querySelector('input[type="radio"][value="portrait"]:checked') ? 'portrait' : null) ||
         (dlg.querySelector('input[type="radio"][value="landscape"]:checked') ? 'landscape' : null) ||
         'landscape';
 
-      // Period: prefer radios; otherwise infer from enabled date inputs
       let mode = (dlg.querySelector('input[name="pdf-period"]:checked')?.value) ||
                  (dlg.querySelector('input[name*="period"]:checked')?.value) || null;
 
@@ -1098,31 +1077,14 @@ filterProgress(){
         else mode = 'today';
       }
 
-      // Find ISO dates
       const pick = (sel) => dlg.querySelector(sel)?.value || '';
       const singleISO = pick('#pdf-single-date') || (enabledDates[0]?.value || '');
       const rangeStartISO = pick('#pdf-range-start') || (enabledDates[0]?.value || '');
       const rangeEndISO   = pick('#pdf-range-end')   || (enabledDates[1]?.value || '');
 
-      // Convert ISO→DMY for exportReportsPDF
-      const isoToDMY = (iso) => {
-        if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
-        const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`;
-      };
-
-      const opts = {
-        orientation,
-        mode,
-        singleDMY:     mode==='single' ? isoToDMY(singleISO)     : null,
-        rangeStartDMY: mode==='range'  ? isoToDMY(rangeStartISO) : null,
-        rangeEndDMY:   mode==='range'  ? isoToDMY(rangeEndISO)   : null
-      };
-
-      // If a temporary overlay is open, close it
       const overlay = document.getElementById('pdf-orient-overlay');
       if (overlay) overlay.remove();
 
-      // Call the real exporter using the normalized API
       try {
         if (mode === 'single' && singleISO){
           this.exportReportsPDF({ orientation, reportMode:'single', reportDate: singleISO });
@@ -1145,7 +1107,7 @@ filterProgress(){
     setTimeout(rebindDateToggles, 0);
   }
 
-  // ===== Enhanced Reports PDF — now supports date / date-range selection =====
+  // ===== Enhanced Reports PDF — supports date / date-range selection =====
   exportReportsPDF(opts){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf;
@@ -1197,7 +1159,6 @@ filterProgress(){
         </div>`;
       document.body.appendChild(overlay);
 
-      // Enable/disable inputs based on chosen period
       const syncPeriodInputs = () => {
         const val = overlay.querySelector('input[name="pdf-period"]:checked')?.value;
         overlay.querySelector('#pdf-date').disabled  = (val!=='single');
@@ -1272,7 +1233,6 @@ filterProgress(){
       return `${dd.padStart(2,"0")}/${mm.padStart(2,"0")}/${yyyy}`;
     };
     const parseYMDFromAny = (val)=>{
-      // Accept "YYYY-MM-DD", "DD/MM/YYYY", "DD-MM-YYYY", Date object
       if (!val) return null;
       if (val instanceof Date) return isNaN(val)? null : new Date(val.getFullYear(),val.getMonth(),val.getDate());
       const s = String(val).trim();
@@ -1287,14 +1247,12 @@ filterProgress(){
       return parseYMD(`${yyyy}-${mm}-${dd}`);
     };
 
-    // Period selection
     const mode = opts.reportMode || 'all';
     const today = new Date();
     const todayDMY = formatDMY(today);
 
     const rows = this.locations || [];
 
-    // For labels + filtering
     let devicesPeriodLabel = "today";
     let singleDMY = null, rangeStartDMY = null, rangeEndDMY = null;
     let startYMD = null, endYMD = null;
@@ -1306,35 +1264,28 @@ filterProgress(){
       startYMD = opts.startDate; endYMD = opts.endDate;
       rangeStartDMY = ymdToDMY(startYMD); rangeEndDMY = ymdToDMY(endYMD);
       devicesPeriodLabel = `from ${rangeStartDMY} to ${rangeEndDMY}`;
-    } else {
-      // all -> keep "today" wording for backward compatibility
     }
 
-    // Aggregates (unfiltered)
     const totalOffices = rows.length;
     const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
     const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
     const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
 
-    // Devices received for selected period
     let devicesReceivedInPeriod = 0;
     if (mode === 'single' && singleDMY){
       devicesReceivedInPeriod = rows.reduce((s,l)=> s + (sameDMY(l.dateOfReceiptOfDevice, singleDMY) ? toInt(l.noOfDevicesReceived) : 0), 0);
     } else if (mode === 'range' && startYMD && endYMD){
       devicesReceivedInPeriod = rows.reduce((s,l)=> s + (inRange(l.dateOfReceiptOfDevice, startYMD, endYMD) ? toInt(l.noOfDevicesReceived) : 0), 0);
     } else {
-      // all -> show "today" as before
       devicesReceivedInPeriod = rows.reduce((s,l)=> s + (normalizeToDMY(l.dateOfReceiptOfDevice) === todayDMY ? toInt(l.noOfDevicesReceived) : 0), 0);
     }
 
-    // Group by division
     const byDiv = {};
     rows.forEach(r=>{
       const d = r.division || "—";
       (byDiv[d] ||= []).push(r);
     });
 
-    // Division entries (main table)
     const entries = Object.entries(byDiv).sort(([a],[b])=>{
       if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
       if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
@@ -1373,7 +1324,6 @@ filterProgress(){
       pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
     };
 
-    // Build "Devices received ... — Division-wise" list for selected period
     const periodGroups = entries.map(([division, arr])=>{
       const items = arr
         .filter(r => {
@@ -1402,7 +1352,6 @@ filterProgress(){
     const margin = 32;
     let y = margin;
 
-    // Colors / fonts (kept professional)
     const headerFill = { r: 232, g: 236, b: 246 };
     const stripeFill = { r: 248, g: 250, b: 255 };
     const borderGray = 180;
@@ -1415,7 +1364,6 @@ filterProgress(){
     const lineH     = 11;
     const padX      = 6;
 
-    // Table columns
     const tableCols = [
       { key:'division', label:'Division', align:'left'  },
       { key:'offices',  label:'Offices', align:'center'},
@@ -1583,7 +1531,7 @@ filterProgress(){
       doc.rect(tableX, y, totalW, headerH, 'F');
 
       // Per-cell borders + text
-      let x = tableX;  // FIX: ensure x is defined
+      let x = tableX;  // ensure x is defined
       tableCols.forEach(c=>{
         doc.rect(x, y, c.w, headerH, 'S');
         const lines = doc.splitTextToSize(c.label, c.w - padX*2);
@@ -1661,14 +1609,12 @@ filterProgress(){
         { key:'n',        label:'Devices', align:'center' }
       ];
 
-      // Flatten rows with group headers
       const rows2 = [];
       periodGroups.forEach(g=>{
         rows2.push({ _group:true, division:g.division, total:g.total });
         g.items.forEach(it => rows2.push({ division:g.division, po:it.po, n:it.n }));
       });
 
-      // Auto widths for second table (NO WORD BREAKING + full-width fit)
       const longestWordWidth2 = (text) => {
         const s = (text ?? "").toString();
         const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
@@ -1726,7 +1672,6 @@ filterProgress(){
 
       cols2.forEach((c,i)=> c.w = desired2[i]);
 
-      // Draw header
       const drawHeader2 = ()=>{
         ensureSpace(22);
         setBorder();
@@ -1743,7 +1688,6 @@ filterProgress(){
       };
       drawHeader2();
 
-      // Draw rows
       rows2.forEach((r)=>{
         if (r._group){
           const text = `${r.division} — Total: ${r.total}`;
@@ -1861,7 +1805,7 @@ filterProgress(){
   // ---- Excel import/export ----
   downloadTemplate(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLEYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
     const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Office','Contact Person','9876543210','9876543211','contact@postoffice.gov.in','Sample Address','Sample Location','Sample City','Sample State','123456',5,'EZETAP ANDROID X990','',0,'','Pending','Not Tested','None'];
     const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]); XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
   }
@@ -1923,7 +1867,6 @@ filterProgress(){
     XLSX.writeFile(wb,`POS_Data_Export_${new Date().toISOString().slice(0,10)}${suffix}.xlsx`);
   }
 
-  // Optional helper: shows a small dialog to export Excel by single date / range (no impact if unused)
   exportDataWithDialog(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
     const id = "excel-export-overlay";
@@ -2066,4 +2009,19 @@ filterProgress(){
   }
 }
 
+// ---- Boot ----
 window.tracker = new AdvancedPOSTracker();
+window.addEventListener("DOMContentLoaded", () => tracker.init());
+
+// ---- Legacy global shims: keep old onclick="..." working if present ----
+(() => {
+  const expose = (...names) =>
+    names.forEach(n => window[n] = (...a) => tracker?.[n]?.(...a));
+  expose(
+    "showLocationForm", "closeLocationModal",
+    "showImportModal",  "closeImportModal",
+    "downloadTemplate", "exportToExcel", "exportDataWithDialog",
+    "exportDashboardPDF","exportProgressPDF",
+    "createBackup","restoreBackup"
+  );
+})();

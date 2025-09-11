@@ -91,7 +91,9 @@ class AdvancedPOSTracker {
       case "dashboard": this.updateDashboard(); break;
       case "locations": this.renderOfficeDetails(); break;   // OWD table
       case "progress": this.displayProgress(); this.updateProgressFilters(); break;
-      case "reports": this.generateReports(); break;
+      case "reports": this.generateReports(); this._wireExportReportsPdfForm();   // NEW: ensure the dialog’s Generate works
+    break;
+
       case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
     }
   }
@@ -369,7 +371,7 @@ const divisionsHTML = `
         <th${thC}>Pending</th>
         <th${thC}>Devices installed</th>
         <th${thC}>Installations Pending</th>
-        <th${thC}>Issues</th>
+        <th${thC}>Offices with Issues</th>
         <th${thC}>Completed</th>
         <th${thC}>Completion %</th>
       </tr>

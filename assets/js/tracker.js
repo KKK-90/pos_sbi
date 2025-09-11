@@ -205,74 +205,82 @@ class AdvancedPOSTracker {
   // ---- legacy lists / progress (frozen) ----
   filterByDivision(name){ this.showTab(null,"progress"); const sel=document.getElementById("progressDivisionFilter"); if (sel){ sel.value=name; this.filterProgressByDivision(); } }
   displayLocations(){ this.renderLocationsList(this.locations, "locationsList"); }
-  renderLocationsList(list, targetId="locationsList"){
-    const target = document.getElementById(targetId);
-    if (!target) return;
+  // Replace the whole renderLocationsList with this version
+renderLocationsList(list, targetId = "locationsList") {
+  const target = document.getElementById(targetId);
+  if (!target) return;
 
-    // bind one delegated listener per target container
-    if (!target._bulkBound){
-      target._bulkBound = true;
-      target.addEventListener("change", (e)=>{
-        const cb = e.target.closest('input[type="checkbox"][data-sel-id]');
-        if (!cb) return;
-        const id = parseInt(cb.getAttribute("data-sel-id"), 10);
-        if (Number.isFinite(id)){
-          if (cb.checked) this.progressSelection.add(id);
-          else this.progressSelection.delete(id);
-          this._updateProgressSelectionBar();
-        }
-      });
-    }
-
-    if (!list.length) {
-      target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
-        <button class="btn btn-primary" onclick="tracker.showLocationForm()">Add Post Office(s)</button></div>`;
-      return;
-    }
-
-    const isProgress = (targetId === "progressList");
-    let html = "";
-    list.forEach(l=>{
-      const statusClass = this.getStatusClass(l.installationStatus);
-      const pct = this.calculateProgress(l);
-
-      const selBox = isProgress
-        ? `<label style="display:flex;align-items:center;gap:6px;">
-             <input type="checkbox" data-sel-id="${l.id}" ${this.progressSelection.has(l.id) ? "checked":""}>
-             <span style="font-size:12px;opacity:.75;">Select</span>
-           </label>`
-        : "";
-
-      html += `
-      <div class="location-card">
-        <div class="location-header">
-          <div class="location-title">${l.postOfficeName} ${l.postOfficeId ? `(${l.postOfficeId})` : ""}</div>
-          <div class="flex gap-10" style="gap:10px;align-items:center;">
-            ${selBox}
-            <span class="status-badge ${statusClass}">${l.installationStatus}</span>
-            ${!isProgress ? `
-              <button class="btn btn-sm btn-primary" onclick="tracker.editLocation(${l.id})">✏️ Edit</button>
-              <button class="btn btn-sm btn-danger" onclick="tracker.deleteLocation(${l.id})">🗑️ Delete</button>
-            ` : ""}
-          </div>
-        </div>
-        <div class="location-details">
-          <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
-          <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
-          <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
-          <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city||""}${l.state?`, ${l.state}`:""}</div></div>
-          <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
-          <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
-        </div>
-        <div style="margin-top:20px;">
-          <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
-            <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
-          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-        </div>
-      </div>`;
+  // one delegated listener per target container (for the "Select" checkboxes)
+  if (!target._bulkBound) {
+    target._bulkBound = true;
+    target.addEventListener("change", (e) => {
+      const cb = e.target.closest('input[type="checkbox"][data-sel-id]');
+      if (!cb) return;
+      const id = parseInt(cb.getAttribute("data-sel-id"), 10);
+      if (Number.isFinite(id)) {
+        if (cb.checked) this.progressSelection.add(id);
+        else this.progressSelection.delete(id);
+        this._updateProgressSelectionBar();
+      }
     });
-    target.innerHTML = html;
   }
+
+  if (!list.length) {
+    target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4>
+      <p>Add Post Offices to get started.</p>
+      <button class="btn btn-primary" onclick="tracker.showLocationForm()">Add Post Office(s)</button></div>`;
+    return;
+  }
+
+  const isProgress = targetId === "progressList";
+  let html = "";
+  list.forEach((l) => {
+    const statusClass = this.getStatusClass(l.installationStatus);
+    const pct = this.calculateProgress(l);
+
+    const selBox = isProgress
+      ? `<label style="display:flex;align-items:center;gap:6px;">
+           <input type="checkbox" data-sel-id="${l.id}" ${this.progressSelection.has(l.id) ? "checked" : ""}>
+           <span style="font-size:12px;opacity:.75;">Select</span>
+         </label>`
+      : "";
+
+    const actions = `
+      <button class="btn btn-sm btn-primary" type="button" onclick="tracker.editLocation(${l.id})">✏️ Edit</button>
+      <button class="btn btn-sm btn-danger"  type="button" onclick="tracker.deleteLocation(${l.id})">🗑️ Delete</button>
+    `;
+
+    html += `
+    <div class="location-card">
+      <div class="location-header">
+        <div class="location-title">${l.postOfficeName} ${l.postOfficeId ? `(${l.postOfficeId})` : ""}</div>
+        <div class="flex" style="gap:10px;align-items:center;">
+          ${selBox}
+          <span class="status-badge ${statusClass}">${l.installationStatus}</span>
+          ${actions}
+        </div>
+      </div>
+
+      <div class="location-details">
+        <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
+        <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
+        <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
+        <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city || ""}${l.state ? `, ${l.state}` : ""}</div></div>
+        <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
+        <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
+      </div>
+
+      <div style="margin-top:20px;">
+        <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
+          <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      </div>
+    </div>`;
+  });
+
+  target.innerHTML = html;
+}
+
   updateFilters(){
     const divisions=[...new Set(this.locations.map(l=>l.division))];
     const sel=document.getElementById("divisionFilter");

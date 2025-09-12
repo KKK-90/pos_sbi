@@ -7,22 +7,14 @@ class AdvancedPOSTracker {
     this.currentLocationId = null;
     this.nextLocationId = 1;
     this.importData = [];
-
-    // FYI: login is now "open" — any non-empty username is accepted & persisted.
-    // Keep this list only for future role gating if you need it.
-    this.users = ["KARNA", "NKR", "SKR", "BGR", "SBI_DOP", "admin", "admin1"];
-
+    this.users = ["KARNA", "NKR", "SKR", "BGR", "SBI_DOP"];
     this.storageKey = "advancedPOSTrackerData";
-    this.sessionKey = "advancedPOSCurrentUser";
 
     // --- Office wise details state (scoped) ---
     this.officeFilters = {};                         // per-column (inline) text filters
     this.topFilters = { division:"", install:"", func:"", blanks:"all" }; // toolbar dropdowns
     this.docStorageKey = "advancedPOSTrackerDocs";   // localStorage key for PDF blobs
     this.uploadAllowedUsers = null;                  // null => everyone; or restrict e.g. ["NKR","SBI_DOP"]
-    this.progressSelection = new Set();              // selected row ids (on Progress tab)
-    this._progressLastIds = [];                      // last rendered ids for "select all in view"
-    this._progressBarWired = false;                  // event wiring guard
   }
 
   async init() {
@@ -47,9 +39,8 @@ class AdvancedPOSTracker {
 
   // ---- session / UI ----
   checkLoginStatus() {
-    // FIX: accept ANY saved username (non-empty) so hard refresh doesn't log you out.
-    const savedUser = (localStorage.getItem(this.sessionKey) || "").trim();
-    if (savedUser) {
+    const savedUser = localStorage.getItem("advancedPOSCurrentUser");
+    if (savedUser && this.users.includes(savedUser)) {
       this.currentUser = savedUser;
       this.showMainApp();
     } else {
@@ -57,40 +48,23 @@ class AdvancedPOSTracker {
     }
   }
   login(username) {
-    const u = (username || "").trim();
-    if (!u) { alert("Enter a username to continue."); return; }
-    this.currentUser = u;
-    localStorage.setItem(this.sessionKey, u);
+    this.currentUser = username;
+    localStorage.setItem("advancedPOSCurrentUser", username);
     this.showMainApp();
   }
   logout() {
     this.currentUser = null;
-    localStorage.removeItem(this.sessionKey);
+    localStorage.removeItem("advancedPOSCurrentUser");
     this.showLoginScreen();
   }
   showLoginScreen() {
-    document.getElementById("loginScreen")?.classList.remove("hidden");
-    document.getElementById("mainApp")?.classList.add("hidden");
+    document.getElementById("loginScreen").classList.remove("hidden");
+    document.getElementById("mainApp").classList.add("hidden");
   }
   showMainApp() {
-    // Unhide main app + any nav/tabs containers
-    document.getElementById("loginScreen")?.classList.add("hidden");
-    const app = document.getElementById("mainApp");
-    if (app) app.classList.remove("hidden");
-
-    // Be defensive: if your header/nav has its own id/class, unhide it too.
-    document.querySelectorAll("#mainApp .tabs, #mainApp .nav, #mainApp .top-nav, .nav-tabs, .tabbar")
-      .forEach(el => el.classList.remove("hidden"));
-
-    const cu = document.getElementById("currentUser");
-    if (cu) cu.textContent = this.currentUser || "User";
-
-    // Make sure at least one nav tab is active visually
-    const firstTabBtn = document.querySelector(".nav-tab");
-    if (firstTabBtn && !document.querySelector(".nav-tab.active")) {
-      firstTabBtn.classList.add("active");
-    }
-
+    document.getElementById("loginScreen").classList.add("hidden");
+    document.getElementById("mainApp").classList.remove("hidden");
+    document.getElementById("currentUser").textContent = this.currentUser || "User";
     this.setupEventListeners();
     this.showTab(null, "dashboard");
     this.updateDashboard();
@@ -115,20 +89,13 @@ class AdvancedPOSTracker {
     }
     switch (tabName) {
       case "dashboard": this.updateDashboard(); break;
-      case "locations": this.renderOfficeDetails(); break;
-      case "progress":
-        this.displayProgress();
-        this.updateProgressFilters();
-        this._ensureProgressBulkUI();
-        this.filterProgress();
-        break;
+      case "locations": this.renderOfficeDetails(); break;   // OWD table
+      case "progress": this.displayProgress(); this.updateProgressFilters(); break;
       case "reports":
         this.generateReports();
-        this._wireExportReportsPdfForm();
+        this._wireExportReportsPdfForm();   // PATCH A: ensure the dialog’s Generate works
         break;
-      case "data-management":
-        this.updateDataStatistics && this.updateDataStatistics();
-        break;
+      case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
     }
   }
 
@@ -147,16 +114,14 @@ class AdvancedPOSTracker {
     } catch { /* ignore */ }
   }
 
-  // ---- dashboard ----
+  // ---- dashboard (frozen) ----
   updateDashboard() { this.updateOverallStats(); this.updateDivisionStats(); this.updateRecentActivity(); }
   updateOverallStats() {
     const totalLocations = this.locations.length;
     const totalDevicesDeployed = this.locations.reduce((sum, l) => sum + (parseInt(l.noOfDevicesReceived) || 0), 0);
     const pending = this.locations.filter(l => l.installationStatus === "Pending").length;
     const withIssues = this.locations.filter(l => l.issuesIfAny && l.issuesIfAny.trim() && l.issuesIfAny !== "None").length;
-    const box = document.getElementById("overallStats");
-    if (!box) return;
-    box.innerHTML = `
+    document.getElementById("overallStats").innerHTML = `
       <div class="stat-card"><div class="stat-number">${totalLocations}</div><div class="stat-label">Total Offices</div></div>
       <div class="stat-card"><div class="stat-number">${totalDevicesDeployed}</div><div class="stat-label">Deployed Devices</div></div>
       <div class="stat-card"><div class="stat-number">${pending}</div><div class="stat-label">Installations Pending</div></div>
@@ -187,22 +152,19 @@ class AdvancedPOSTracker {
           </div>
         </div>`;
     }
-    const box = document.getElementById("divisionStats");
-    if (box) box.innerHTML = html;
+    document.getElementById("divisionStats").innerHTML = html;
   }
   getStatusClass(status) { return status==="Completed"?"status-completed":(status==="In Progress"||status==="Device Received")?"status-in-progress":"status-pending"; }
   calculateProgress(l) { if (!l.numberOfPosToBeDeployed) return 0; return Math.round(((l.noOfDevicesReceived||0)/l.numberOfPosToBeDeployed)*100); }
   updateRecentActivity() {
     const rec = this.locations.slice(-5).reverse();
-    const wrap = document.getElementById("recentActivity");
-    if (!wrap) return;
     if (!rec.length) {
-      wrap.innerHTML = `
+      document.getElementById("recentActivity").innerHTML = `
         <div class="alert alert-info"><h4>🚀 Welcome to Advanced POS Tracker!</h4>
         <p>Start by importing Excel data or adding locations.</p>
         <div style="margin-top:15px;">
           <button class="btn btn-primary" onclick="tracker.showTab(null,'data-management')">📊 Manage Data</button>
-          <button class="btn btn-success" onclick="tracker.showLocationForm()">➕ Add Location</button>
+          <button class="btn btn-success" onclick="showLocationForm()">➕ Add Location</button>
         </div></div>`;
       return;
     }
@@ -222,68 +184,38 @@ class AdvancedPOSTracker {
         <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
       </div>`;
     });
-    wrap.innerHTML = html;
+    document.getElementById("recentActivity").innerHTML = html;
   }
 
-  // ---- lists / progress ----
+  // ---- legacy lists / progress (frozen) ----
   filterByDivision(name){ this.showTab(null,"progress"); const sel=document.getElementById("progressDivisionFilter"); if (sel){ sel.value=name; this.filterProgressByDivision(); } }
   displayLocations(){ this.renderLocationsList(this.locations, "locationsList"); }
-
   renderLocationsList(list, targetId="locationsList"){
     const target = document.getElementById(targetId);
-    if (!target) return;
-
-    if (!target._bulkBound){
-      target._bulkBound = true;
-      target.addEventListener("change", (e)=>{
-        const cb = e.target.closest('input[type="checkbox"][data-sel-id]');
-        if (!cb) return;
-        const id = parseInt(cb.getAttribute("data-sel-id"), 10);
-        if (Number.isFinite(id)){
-          if (cb.checked) this.progressSelection.add(id);
-          else this.progressSelection.delete(id);
-          this._updateProgressSelectionBar();
-        }
-      });
-    }
-
     if (!list.length) {
       target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
-        <button class="btn btn-primary" onclick="tracker.showLocationForm()">Add Post Office(s)</button></div>`;
+        <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
       return;
     }
-
-    const isProgress = (targetId === "progressList");
     let html = "";
     list.forEach(l=>{
       const statusClass = this.getStatusClass(l.installationStatus);
       const pct = this.calculateProgress(l);
-      const selBox = isProgress
-        ? `<label style="display:flex;align-items:center;gap:6px;">
-             <input type="checkbox" data-sel-id="${l.id}" ${this.progressSelection.has(l.id) ? "checked":""}>
-             <span style="font-size:12px;opacity:.75;">Select</span>
-           </label>`
-        : "";
-      const actions = `
-        <button class="btn btn-sm btn-primary" onclick="tracker.editLocation(${l.id})" type="button">✏️ Edit</button>
-        <button class="btn btn-sm btn-danger" onclick="tracker.deleteLocation(${l.id})" type="button">🗑️ Delete</button>
-      `;
-
       html += `
       <div class="location-card">
         <div class="location-header">
-          <div class="location-title">${l.postOfficeName} ${l.postOfficeId ? `(${l.postOfficeId})` : ""}</div>
-          <div class="flex" style="gap:10px;align-items:center;">
-            ${selBox}
+          <div class="location-title">${l.postOfficeName} (${l.postOfficeId})</div>
+          <div class="flex gap-10">
             <span class="status-badge ${statusClass}">${l.installationStatus}</span>
-            ${actions}
+            <button class="btn btn-sm btn-primary" onclick="tracker.editLocation(${l.id})">✏️ Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="tracker.deleteLocation(${l.id})">🗑️ Delete</button>
           </div>
         </div>
         <div class="location-details">
           <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
           <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
           <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
-          <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city||""}${l.state?`, ${l.state}`:""}</div></div>
+          <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city}, ${l.state}</div></div>
           <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
           <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
         </div>
@@ -296,7 +228,6 @@ class AdvancedPOSTracker {
     });
     target.innerHTML = html;
   }
-
   updateFilters(){
     const divisions=[...new Set(this.locations.map(l=>l.division))];
     const sel=document.getElementById("divisionFilter");
@@ -320,190 +251,6 @@ class AdvancedPOSTracker {
     const sel=document.getElementById("progressDivisionFilter");
     if (sel){ sel.innerHTML=`<option value="">All Divisions</option>`; divisions.forEach(d=> sel.innerHTML+=`<option value="${d}">${d}</option>`); }
   }
-
-  // ===== Progress bulk actions =====
-  _ensureProgressBulkUI(){
-    const host = document.querySelector('#progress');
-    if (!host) return;
-
-    let bar = document.getElementById('progress-bulk-bar');
-    if (!bar){
-      bar = document.createElement('div');
-      bar.id = 'progress-bulk-bar';
-      bar.style.display = 'flex';
-      bar.style.flexWrap = 'wrap';
-      bar.style.gap = '8px';
-      bar.style.alignItems = 'center';
-      bar.style.margin = '10px 0 14px';
-      bar.innerHTML = `
-        <span id="progress-selected-pill" class="badge" style="background:#eef3ff;color:#234; padding:6px 10px;border-radius:999px;font-size:12px;">
-          Selected: <strong id="progress-selected-count">0</strong>
-        </span>
-        <button id="progress-select-all"   class="btn btn-sm btn-secondary">Select all in view</button>
-        <button id="progress-clear-sel"    class="btn btn-sm btn-light">Clear selection</button>
-        <button id="progress-bulk-update"  class="btn btn-sm btn-primary">Bulk update</button>
-      `;
-      const filtersRow = host.querySelector('.filters') || host;
-      if (filtersRow?.parentElement) {
-        filtersRow.parentElement.insertBefore(bar, filtersRow.nextSibling);
-      } else {
-        host.prepend(bar);
-      }
-    }
-
-    if (!this._progressBarWired){
-      this._progressBarWired = true;
-      document.getElementById('progress-select-all')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(true));
-      document.getElementById('progress-clear-sel')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(false));
-      document.getElementById('progress-bulk-update')?.addEventListener('click', ()=> this._openBulkUpdateModal());
-    }
-
-    this._updateProgressSelectionBar();
-  }
-
-  _updateProgressSelectionBar(){
-    const n = this.progressSelection.size;
-    const pill = document.getElementById('progress-selected-count');
-    if (pill) pill.textContent = String(n);
-  }
-  _toggleProgressSelectAllCurrent(select=true){
-    (this._progressLastIds || []).forEach(id => {
-      if (select) this.progressSelection.add(id); else this.progressSelection.delete(id);
-    });
-    this.filterProgress();
-  }
-  _clearProgressSelection(){
-    this.progressSelection.clear();
-    this.filterProgress();
-  }
-
-  _openBulkUpdateModal(){
-    if (this.progressSelection.size === 0){
-      alert('Select at least one Post Office in the list to bulk update.');
-      return;
-    }
-    const id = 'bulk-update-overlay';
-    if (document.getElementById(id)) return;
-
-    const today = new Date().toISOString().slice(0,10);
-    const modal = document.createElement('div');
-    modal.id = id;
-    modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2500;display:flex;align-items:center;justify-content:center;">
-        <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:520px;max-width:90vw;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
-          <h3 style="margin:0 0 6px;font-size:16px;color:#2c3e50;">Bulk update (${this.progressSelection.size} selected)</h3>
-          <p style="margin:0 0 12px;font-size:12.5px;opacity:.8;">Leave a field blank to keep its current value.</p>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-              <span>Installation status</span>
-              <select id="bulk-install" class="filter-select" style="padding:7px 8px;">
-                <option value="">(keep)</option>
-                <option>Pending</option>
-                <option>Device Received</option>
-                <option>In Progress</option>
-                <option>Completed</option>
-              </select>
-            </label>
-
-            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-              <span>Functionality status</span>
-              <select id="bulk-func" class="filter-select" style="padding:7px 8px;">
-                <option value="">(keep)</option>
-                <option>Not Tested</option>
-                <option>Working</option>
-                <option>Not Working</option>
-              </select>
-            </label>
-
-            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-              <span>Date of receipt of device</span>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <input id="bulk-date" type="date" style="flex:1;padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
-                <button id="bulk-set-today" class="btn btn-sm btn-light" type="button">Today</button>
-              </div>
-            </label>
-
-            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-              <span>No. of devices received</span>
-              <input id="bulk-devices" type="number" min="0" step="1" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
-            </label>
-
-            <label style="grid-column:1 / -1; display:flex;flex-direction:column;gap:6px;font-size:13px;">
-              <span>Issues (if any)</span>
-              <input id="bulk-issues" type="text" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
-              <div style="display:flex;gap:10px;align-items:center;margin-top:4px;">
-                <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;">
-                  <input id="bulk-clear-issues" type="checkbox"> <span>Set to “None”</span>
-                </label>
-              </div>
-            </label>
-          </div>
-
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
-            <button id="bulk-cancel" class="btn btn-sm btn-secondary">Cancel</button>
-            <button id="bulk-apply"  class="btn btn-sm btn-primary">Apply</button>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(modal);
-
-    modal.querySelector('#bulk-set-today')?.addEventListener('click', ()=>{
-      const el = modal.querySelector('#bulk-date'); if (el) el.value = today;
-    });
-    modal.querySelector('#bulk-cancel')?.addEventListener('click', ()=> modal.remove());
-    modal.querySelector('#bulk-apply')?.addEventListener('click', ()=>{
-      const payload = {
-        installationStatus: modal.querySelector('#bulk-install')?.value || "",
-        functionalityStatus: modal.querySelector('#bulk-func')?.value || "",
-        dateOfReceiptOfDevice: modal.querySelector('#bulk-date')?.value || "",
-        noOfDevicesReceived: modal.querySelector('#bulk-devices')?.value || "",
-        issuesIfAny: modal.querySelector('#bulk-clear-issues')?.checked ? "None" : (modal.querySelector('#bulk-issues')?.value || "")
-      };
-      modal.remove();
-      this._applyBulkUpdate(payload);
-    });
-  }
-
-  _applyBulkUpdate(payload){
-    const has = (v)=> v !== null && v !== undefined && String(v).trim() !== "";
-    let changed = 0;
-
-    const toInt = (v)=> {
-      const n = parseInt(v, 10);
-      return Number.isFinite(n) ? n : null;
-    };
-
-    const updates = {
-      installationStatus: has(payload.installationStatus) ? String(payload.installationStatus) : null,
-      functionalityStatus: has(payload.functionalityStatus) ? String(payload.functionalityStatus) : null,
-      dateOfReceiptOfDevice: has(payload.dateOfReceiptOfDevice) ? String(payload.dateOfReceiptOfDevice) : null,
-      noOfDevicesReceived: has(payload.noOfDevicesReceived) ? toInt(payload.noOfDevicesReceived) : null,
-      issuesIfAny: (payload.issuesIfAny === "None") ? "None" : (has(payload.issuesIfAny) ? String(payload.issuesIfAny) : null)
-    };
-
-    const selected = new Set(this.progressSelection);
-    if (!selected.size) { alert("Selection cleared. Nothing to update."); return; }
-
-    this.locations = this.locations.map(l=>{
-      if (!selected.has(l.id)) return l;
-      const next = { ...l };
-      if (updates.installationStatus !== null) next.installationStatus = updates.installationStatus;
-      if (updates.functionalityStatus !== null) next.functionalityStatus = updates.functionalityStatus;
-      if (updates.dateOfReceiptOfDevice !== null) next.dateOfReceiptOfDevice = updates.dateOfReceiptOfDevice;
-      if (updates.noOfDevicesReceived !== null) next.noOfDevicesReceived = updates.noOfDevicesReceived;
-      if (updates.issuesIfAny !== null) next.issuesIfAny = updates.issuesIfAny;
-      changed++;
-      return next;
-    });
-
-    this.saveToStorage();
-    this.updateDashboard();
-    this.filterProgress();
-    alert(`Updated ${changed} record(s) successfully.`);
-  }
-
   filterProgressByDivision(){
     const d=document.getElementById("progressDivisionFilter").value;
     const list = d ? this.locations.filter(l=>l.division===d) : this.locations;
@@ -519,13 +266,10 @@ class AdvancedPOSTracker {
       const matchesDivision = !div || l.division===div;
       return matchesSearch && matchesStatus && matchesDivision;
     });
-
-    this._progressLastIds = filtered.map(l => l.id);
     this.renderLocationsList(filtered,"progressList");
-    this._updateProgressSelectionBar();
   }
 
-  // ---- reports (kept from previous build) ----
+  // ---- reports (frozen UI; PDF enhanced below) ----
   generateReports(){
     const host = document.getElementById("reportsContent");
     if (!host) return;
@@ -679,9 +423,9 @@ class AdvancedPOSTracker {
     host.innerHTML = summaryHTML + divisionsHTML + issuesHTML;
   }
 
-  // ---- Office wise details (table) ----
+  // ===== Office wise details (table view) =====
   renderOfficeDetails(){
-    this._ensureOWDStyles();
+    this._ensureOWDStyles();  // add scoped CSS once
 
     const hostHead = document.getElementById("owd-thead");
     const hostBody = document.getElementById("owd-tbody");
@@ -690,6 +434,7 @@ class AdvancedPOSTracker {
     const table    = document.getElementById("owd-table");
     if (!hostHead || !hostBody || !table) return;
 
+    // Ensure top toolbar dropdowns beside global search (created once)
     this._ensureTopFiltersUI();
 
     const cols = this._owdColumns();
@@ -699,6 +444,7 @@ class AdvancedPOSTracker {
       "serialNo","mid","tid","installationStatus","functionalityStatus"
     ]);
 
+    // Header row: center-align all labels; inline filter inputs without placeholder text
     const headRow = `<tr class="header">${
       cols.map(c => {
         const filter = (c.type === 'docs')
@@ -709,14 +455,20 @@ class AdvancedPOSTracker {
     }</tr>`;
     hostHead.innerHTML = headRow;
 
+    // Bind inline filters BEFORE applying (prevents empty first paint)
     this._bindOfficeFilters(cols);
 
+    // Apply all filters (inline, global, toolbar dropdowns)
     let { rows } = this._applyOfficeFilters(cols);
+
+    // Safety: if everything filtered out unintentionally, show all
     if (!rows.length && (this.locations || []).length) rows = this.locations;
 
+    // Render body
     hostBody.innerHTML = rows.map(loc => {
       return `<tr>${cols.map(c=>{
         if (c.type === 'docs') return `<td style="text-align:center">${this._docCellHTML(loc)}</td>`;
+
         let val = (loc[c.key] ?? "");
         if (c.key === 'dateOfReceiptOfDevice' && val) {
           const d = new Date(val); if (!isNaN(d)) {
@@ -735,9 +487,10 @@ class AdvancedPOSTracker {
       }).join("")}</tr>`;
     }).join("");
 
+    // Statistics: rows count + blank field stats
     const stats = this._blankStats(this.locations, cols);
-    const total = (this.locations || []).length;
     if (meta) {
+      const total = (this.locations || []).length;
       const dupeCount = this._collectSerialDuplicates().size;
       meta.innerHTML = `
         <div><strong>Rows:</strong> ${rows.length} of ${total} &nbsp;•&nbsp; <strong>Duplicate Serial Nos:</strong> ${dupeCount}</div>
@@ -745,11 +498,13 @@ class AdvancedPOSTracker {
       `;
     }
 
+    // Global search input (bind once)
     if (global && !global._owdBound){
       global._owdBound = true;
       global.addEventListener("input", () => this.renderOfficeDetails());
     }
 
+    // Delegate upload change events (bind once)
     const wrap = table.closest(".table-scroll") || table.parentElement;
     if (wrap && !wrap._owdBound){
       wrap._owdBound = true;
@@ -763,10 +518,12 @@ class AdvancedPOSTracker {
       });
     }
 
+    // Synchronized top horizontal scrollbar (sticky)
     this._setupHorizontalSync(table);
   }
 
   _owdColumns(){
+    // Order and names remain as existing Excel/template + extra columns; header wording unchanged
     return [
       { key:'slNo',                      label:'Sl.No.' },
       { key:'division',                  label:'Division' },
@@ -824,6 +581,7 @@ class AdvancedPOSTracker {
         if (!cell.includes(v.toLowerCase())) return false;
       }
 
+      // Toolbar dropdowns
       if (this.topFilters.division && (loc.division||"") !== this.topFilters.division) return false;
       if (this.topFilters.install && (loc.installationStatus||"") !== this.topFilters.install) return false;
       if (this.topFilters.func && (loc.functionalityStatus||"") !== this.topFilters.func) return false;
@@ -872,6 +630,7 @@ class AdvancedPOSTracker {
     const search = document.getElementById("owd-global-search");
     if (!search) return;
 
+    // create container once, right after the search input
     let box = document.getElementById("owd-top-filters");
     if (!box){
       box = document.createElement("div");
@@ -879,10 +638,12 @@ class AdvancedPOSTracker {
       box.style.display = "flex";
       box.style.flexWrap = "wrap";
       box.style.gap = "8px";
+      // place next to the search field
       const parent = search.parentElement || search.closest(".filters") || document.querySelector("#locations .filters") || document.body;
       parent.appendChild(box);
     }
 
+    // helper to create select
     const makeSelect = (id, label) => {
       let sel = document.getElementById(id);
       if (!sel){
@@ -892,6 +653,7 @@ class AdvancedPOSTracker {
         sel.style.minWidth = "170px";
         sel.setAttribute("aria-label", label);
         sel.addEventListener("change", ()=>{
+          // update state
           if (id==="owd-dd-division") this.topFilters.division = sel.value;
           if (id==="owd-dd-install")  this.topFilters.install  = sel.value;
           if (id==="owd-dd-func")     this.topFilters.func     = sel.value;
@@ -903,21 +665,25 @@ class AdvancedPOSTracker {
       return sel;
     };
 
+    // Division
     const divisions = Array.from(new Set((this.locations||[]).map(l=>l.division).filter(Boolean))).sort();
     const sDiv = makeSelect("owd-dd-division","Division");
     sDiv.innerHTML = `<option value="">All Divisions</option>${divisions.map(d=>`<option value="${this._escape(d)}">${this._escape(d)}</option>`).join("")}`;
     sDiv.value = this.topFilters.division;
 
+    // Installation status
     const insts = Array.from(new Set((this.locations||[]).map(l=>l.installationStatus).filter(Boolean))).sort();
     const sIns = makeSelect("owd-dd-install","Installation status");
     sIns.innerHTML = `<option value="">All Installation status</option>${insts.map(s=>`<option value="${this._escape(s)}">${this._escape(s)}</option>`).join("")}`;
     sIns.value = this.topFilters.install;
 
+    // Functionality status
     const funcs = Array.from(new Set((this.locations||[]).map(l=>l.functionalityStatus).filter(Boolean))).sort();
     const sFun = makeSelect("owd-dd-func","Functionality status");
     sFun.innerHTML = `<option value="">All Functionality status</option>${funcs.map(s=>`<option value="${this._escape(s)}">${this._escape(s)}</option>`).join("")}`;
     sFun.value = this.topFilters.func;
 
+    // Blank fields dropdown
     const sBlank = makeSelect("owd-dd-blanks","Blank fields");
     sBlank.innerHTML = `
       <option value="all">All rows</option>
@@ -931,15 +697,18 @@ class AdvancedPOSTracker {
     const wrap = table.closest(".table-scroll") || table.parentElement;
     if (!wrap) return;
 
+    // Make top scroller once
     let top = document.getElementById("owd-hscroll-top");
     if (!top){
       top = document.createElement("div");
       top.id = "owd-hscroll-top";
       top.className = "owd-hscroll";
       top.innerHTML = `<div class="owd-hscroll-inner"></div>`;
+      // insert above the table wrapper
       wrap.parentElement.insertBefore(top, wrap);
     }
 
+    // Size the fake inner to table width
     const inner = top.querySelector(".owd-hscroll-inner");
     const syncWidth = () => { inner.style.width = table.scrollWidth + "px"; };
     syncWidth();
@@ -948,6 +717,7 @@ class AdvancedPOSTracker {
       this._owdResizeObs.observe(table);
     }
 
+    // Sync scroll positions (both ways)
     const sync = (src, dst) => {
       let ticking = false;
       src.addEventListener("scroll", ()=>{
@@ -966,6 +736,7 @@ class AdvancedPOSTracker {
   _ensureOWDStyles(){
     if (document.getElementById("owd-enhanced-style")) return;
     const css = `
+/* ===== Office wise details (scoped) ===== */
 #owd-hscroll-top.owd-hscroll{
   position: sticky; top: 0; z-index: 3;
   height: 14px; overflow-x: auto; overflow-y: hidden;
@@ -973,18 +744,24 @@ class AdvancedPOSTracker {
 }
 #owd-hscroll-top .owd-hscroll-inner{ height: 1px; }
 
-.owd-table{ table-layout: auto; width: max-content; border-collapse: separate; border-spacing: 0; }
-.owd-table th, .owd-table td{ border-right: 1px solid #e6ebf2; border-bottom: 1px solid #e6ebf2; }
+.owd-table{
+  table-layout: auto; width: max-content; border-collapse: separate; border-spacing: 0;
+}
+.owd-table th, .owd-table td{
+  border-right: 1px solid #e6ebf2; border-bottom: 1px solid #e6ebf2;
+}
 .owd-table th:first-child, .owd-table td:first-child{ border-left: 1px solid #e6ebf2; }
 .owd-table thead th{ border-top: 1px solid #e6ebf2; background:#f8fafc; text-align:center; }
-.owd-table thead tr.header th{ position: sticky; top: 0; z-index: 2; }
+.owd-table thead tr.header th{
+  position: sticky; top: 0; z-index: 2; /* stick header with filters inside */
+}
 #owd-thead .owd-filter-wrap{ margin-top: 6px; }
 #owd-thead .owd-filter{
   width: 100%; padding: 6px 8px; font-size: 13px;
   border: 1px solid #dfe4ea; border-radius: 6px; background:#fff;
 }
-.cell-empty{ background:#fdecec; }
-.cell-dup{ background:#fff3cd; }
+.cell-empty{ background:#fdecec; }   /* blanks light red */
+.cell-dup{ background:#fff3cd; }     /* dup serials light amber */
 .doc-actions{ display:flex; gap:8px; justify-content:center; }
     `.trim();
     const style = document.createElement("style");
@@ -993,13 +770,14 @@ class AdvancedPOSTracker {
     document.head.appendChild(style);
   }
 
+  // ---- Documents (PDF) storage & cell UI (unchanged) ----
   _docCellHTML(loc){
     const id = loc.id;
     const list = this._loadDocs()[id] || [];
     const links = list.map((d, i) => `<a href="${d.dataUrl}" target="_blank" rel="noopener">View ${i+1}</a>`).join(" &nbsp; ");
     const canUpload = Array.isArray(this.uploadAllowedUsers)
         ? this.uploadAllowedUsers.includes(this.currentUser)
-        : true;
+        : true; // null => allow all
     const uploadBtn = canUpload
       ? `<label class="btn btn-sm btn-secondary" style="margin:0;cursor:pointer;">
            Upload<input type="file" accept="application/pdf" data-doc-for="${id}" style="display:none;">
@@ -1007,6 +785,7 @@ class AdvancedPOSTracker {
       : "";
     return `<div class="doc-actions">${links || '<span style="opacity:.6">—</span>'}${uploadBtn ? '&nbsp;'+uploadBtn : ''}</div>`;
   }
+
   _handleDocUpload(id, file){
     if (!file || file.type !== "application/pdf"){ alert("Please select a PDF file."); return; }
     const fr = new FileReader();
@@ -1018,28 +797,790 @@ class AdvancedPOSTracker {
     };
     fr.readAsDataURL(file);
   }
+
   _loadDocs(){
     try{ return JSON.parse(localStorage.getItem(this.docStorageKey) || "{}"); }catch{ return {}; }
   }
+
   _escape(v){
     return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
   }
 
-  // ---- simple PDFs + Excel/backup CRUD (unchanged) ----
+  // ---- PDF + CRUD + Import/Export + Backup (all frozen below) ----
   exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
   exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
-  _wireExportReportsPdfForm(){ /* no-op here; keep your dialog if present */ }
-  exportReportsPDF(){ this._pdfSimple("NKR POS Deployment Report"); }
+
+  // ===== PATCH B: Wire the Reports → Export PDF dialog "Generate" button =====
+  _wireExportReportsPdfForm(){
+    if (this._pdfDialogWired) return;
+    this._pdfDialogWired = true;
+
+    const rebindDateToggles = () => {
+      const dlg = document.querySelector('.modal, [role="dialog"], #pdf-orient-overlay');
+      if (!dlg) return;
+
+      const radios = dlg.querySelectorAll('input[name="pdf-period"], input[name*="period"]');
+      const single = dlg.querySelector('input[type="date"][data-role="single"], #pdf-single-date');
+      const rangeA = dlg.querySelector('input[type="date"][data-role="from"], #pdf-range-start');
+      const rangeB = dlg.querySelector('input[type="date"][data-role="to"],   #pdf-range-end');
+
+      const setState = () => {
+        let val = dlg.querySelector('input[name="pdf-period"]:checked')?.value
+               || dlg.querySelector('input[name*="period"]:checked')?.value
+               || 'today';
+        if (single) single.disabled = (val !== 'single');
+        if (rangeA) rangeA.disabled = (val !== 'range');
+        if (rangeB) rangeB.disabled = (val !== 'range');
+      };
+      radios.forEach(r => r.addEventListener('change', setState));
+      setState();
+    };
+
+    // Delegated click for the dialog's Generate button
+    document.addEventListener('click', (e)=>{
+      // Accept several selectors and a fallback by button text "Generate"
+      let btn = e.target.closest('#pdf-orient-generate, [data-export-pdf-generate], .export-pdf-generate-btn');
+      if (!btn){
+        const maybe = e.target.closest('button');
+        const dlg = e.target.closest('.modal, [role="dialog"], #pdf-orient-overlay');
+        if (dlg && maybe && maybe.textContent.trim().toLowerCase() === 'generate') btn = maybe;
+      }
+      if (!btn) return;
+
+      const dlg = btn.closest('.modal, [role="dialog"], #pdf-orient-overlay') || document;
+
+      // Orientation (prefer explicit group, otherwise any radio with these values)
+      const orientation =
+        (dlg.querySelector('input[name="pdf-orient"]:checked')?.value) ||
+        (dlg.querySelector('input[type="radio"][value="portrait"]:checked') ? 'portrait' : null) ||
+        (dlg.querySelector('input[type="radio"][value="landscape"]:checked') ? 'landscape' : null) ||
+        'landscape';
+
+      // Period: prefer radios; otherwise infer from enabled date inputs
+      let mode = (dlg.querySelector('input[name="pdf-period"]:checked')?.value) ||
+                 (dlg.querySelector('input[name*="period"]:checked')?.value) || null;
+
+      const enabledDates = [...dlg.querySelectorAll('input[type="date"]')].filter(i=>!i.disabled);
+      if (!mode){
+        if (enabledDates.length >= 2) mode = 'range';
+        else if (enabledDates.length === 1) mode = 'single';
+        else mode = 'today';
+      }
+
+      // Find ISO dates
+      const pick = (sel) => dlg.querySelector(sel)?.value || '';
+      const singleISO = pick('#pdf-single-date') || (enabledDates[0]?.value || '');
+      const rangeStartISO = pick('#pdf-range-start') || (enabledDates[0]?.value || '');
+      const rangeEndISO   = pick('#pdf-range-end')   || (enabledDates[1]?.value || '');
+
+      // Convert ISO→DMY for exportReportsPDF
+      const isoToDMY = (iso) => {
+        if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+        const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`;
+      };
+
+      const opts = {
+        orientation,
+        mode,
+        singleDMY:     mode==='single' ? isoToDMY(singleISO)     : null,
+        rangeStartDMY: mode==='range'  ? isoToDMY(rangeStartISO) : null,
+        rangeEndDMY:   mode==='range'  ? isoToDMY(rangeEndISO)   : null
+      };
+
+      // If a temporary overlay is open, close it
+      const overlay = document.getElementById('pdf-orient-overlay');
+      if (overlay) overlay.remove();
+
+      // Call the real exporter using the normalized API
+      try {
+        if (mode === 'single' && singleISO){
+          this.exportReportsPDF({ orientation, reportMode:'single', reportDate: singleISO });
+        } else if (mode === 'range' && rangeStartISO && rangeEndISO){
+          this.exportReportsPDF({ orientation, reportMode:'range', startDate: rangeStartISO, endDate: rangeEndISO });
+        } else {
+          this.exportReportsPDF({ orientation, reportMode:'all' });
+        }
+      } catch (err){
+        console.error('Export PDF failed:', err);
+        alert('Could not generate the PDF. Please try again.');
+      }
+    }, true);
+
+    // Rebind toggles when the dialog opens (best effort)
+    document.addEventListener('click', (e)=>{
+      const openBtn = e.target.closest('[data-export-reports-open], #btnExportReportsPDF');
+      if (openBtn) setTimeout(rebindDateToggles, 0);
+    });
+    setTimeout(rebindDateToggles, 0);
+  }
+
+  // ===== Enhanced Reports PDF — now supports date / date-range selection =====
+  exportReportsPDF(opts){
+    if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
+    const { jsPDF } = window.jspdf;
+
+    // --- Selection overlay (orientation + period) ---
+    if (!opts || !opts.orientation){
+      const id = "pdf-orient-overlay";
+      if (document.getElementById(id)) return;
+      const todayYMD = new Date().toISOString().slice(0,10);
+      const overlay = document.createElement("div");
+      overlay.id = id;
+      overlay.innerHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
+          <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:420px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+            <h3 style="margin:0 0 10px;font-size:16px;color:#2c3e50;">Export Reports PDF</h3>
+
+            <div style="margin:4px 0 8px;font-size:13px;color:#34495e;"><strong>Orientation</strong></div>
+            <div style="display:flex;gap:12px;margin:0 0 10px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input type="radio" name="pdf-orient" value="portrait"> Portrait
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input type="radio" name="pdf-orient" value="landscape" checked> Landscape
+              </label>
+            </div>
+
+            <div style="margin:6px 0 6px;font-size:13px;color:#34495e;"><strong>Report period</strong></div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                <input type="radio" name="pdf-period" value="all" checked> Today
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                <input type="radio" name="pdf-period" value="single"> Single date:
+                <input id="pdf-date" type="date" value="${todayYMD}" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                <input type="radio" name="pdf-period" value="range"> Date range:
+                <input id="pdf-start" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+                <span style="opacity:.7">to</span>
+                <input id="pdf-end" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              </label>
+            </div>
+
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+              <button id="pdf-orient-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
+              <button id="pdf-orient-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Generate</button>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      // Enable/disable inputs based on chosen period
+      const syncPeriodInputs = () => {
+        const val = overlay.querySelector('input[name="pdf-period"]:checked')?.value;
+        overlay.querySelector('#pdf-date').disabled  = (val!=='single');
+        overlay.querySelector('#pdf-start').disabled = (val!=='range');
+        overlay.querySelector('#pdf-end').disabled   = (val!=='range');
+      };
+      overlay.querySelectorAll('input[name="pdf-period"]').forEach(r=> r.addEventListener('change', syncPeriodInputs));
+      syncPeriodInputs();
+
+      overlay.querySelector("#pdf-orient-cancel").onclick = ()=> overlay.remove();
+      overlay.querySelector("#pdf-orient-generate").onclick = ()=>{
+        const sel = overlay.querySelector('input[name="pdf-orient"]:checked')?.value || "landscape";
+        const period = overlay.querySelector('input[name="pdf-period"]:checked')?.value || "all";
+        const date = overlay.querySelector('#pdf-date')?.value || "";
+        const start = overlay.querySelector('#pdf-start')?.value || "";
+        const end = overlay.querySelector('#pdf-end')?.value || "";
+        overlay.remove();
+
+        if (period === 'single'){
+          this.exportReportsPDF({ orientation: sel, reportMode: 'single', reportDate: date });
+        } else if (period === 'range'){
+          this.exportReportsPDF({ orientation: sel, reportMode: 'range', startDate: start, endDate: end });
+        } else {
+          this.exportReportsPDF({ orientation: sel, reportMode: 'all' });
+        }
+      };
+      return;
+    }
+
+    // ==== PDF generation with optional date filters ====
+    const orientation = opts.orientation === "portrait" ? "portrait" : "landscape";
+
+    const ymdToDMY = (ymd)=>{
+      if (!ymd) return null;
+      const [Y,M,D] = ymd.split("-");
+      if (!Y || !M || !D) return null;
+      return `${D.padStart(2,"0")}/${M.padStart(2,"0")}/${Y}`;
+    };
+    const parseYMD = (ymd)=>{
+      if (!ymd) return null;
+      const d = new Date(ymd+"T00:00:00");
+      return isNaN(d) ? null : d;
+    };
+    const sameDMY = (val, dmy)=>{
+      const n = normalizeToDMY(val);
+      return n && dmy && n === dmy;
+    };
+    const inRange = (val, startYMD, endYMD)=>{
+      const d = parseYMDFromAny(val);
+      if (!d) return false;
+      const s = startYMD ? parseYMD(startYMD) : null;
+      const e = endYMD ? parseYMD(endYMD) : null;
+      if (s && d < s) return false;
+      if (e && d > e) return false;
+      return true;
+    };
+    const formatDMY = (d)=> {
+      const dd = String(d.getDate()).padStart(2,"0");
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    };
+    const toInt = v => parseInt(v) || 0;
+    const normalizeToDMY = (val)=>{
+      if (!val) return null;
+      const t = String(val).trim();
+      let dd, mm, yyyy;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(t)){ [yyyy,mm,dd] = t.split("-"); }
+      else if (/^\d{2}\/\d{2}\/\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("/"); }
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(t)){ [dd,mm,yyyy] = t.split("-"); }
+      else { const d=new Date(t); return isNaN(d)? null: formatDMY(d); }
+      return `${dd.padStart(2,"0")}/${mm.padStart(2,"0")}/${yyyy}`;
+    };
+    const parseYMDFromAny = (val)=>{
+      // Accept "YYYY-MM-DD", "DD/MM/YYYY", "DD-MM-YYYY", Date object
+      if (!val) return null;
+      if (val instanceof Date) return isNaN(val)? null : new Date(val.getFullYear(),val.getMonth(),val.getDate());
+      const s = String(val).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return parseYMD(s);
+      let dd, mm, yyyy;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)){ [dd,mm,yyyy] = s.split("/"); }
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(s)){ [dd,mm,yyyy] = s.split("-"); }
+      else {
+        const d = new Date(s);
+        return isNaN(d) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+      return parseYMD(`${yyyy}-${mm}-${dd}`);
+    };
+
+    // Period selection
+    const mode = opts.reportMode || 'all';
+    const today = new Date();
+    const todayDMY = formatDMY(today);
+
+    const rows = this.locations || [];
+
+    // For labels + filtering
+    let devicesPeriodLabel = "today";
+    let singleDMY = null, rangeStartDMY = null, rangeEndDMY = null;
+    let startYMD = null, endYMD = null;
+
+    if (mode === 'single' && opts.reportDate){
+      singleDMY = ymdToDMY(opts.reportDate);
+      devicesPeriodLabel = `on ${singleDMY}`;
+    } else if (mode === 'range' && opts.startDate && opts.endDate){
+      startYMD = opts.startDate; endYMD = opts.endDate;
+      rangeStartDMY = ymdToDMY(startYMD); rangeEndDMY = ymdToDMY(endYMD);
+      devicesPeriodLabel = `from ${rangeStartDMY} to ${rangeEndDMY}`;
+    } else {
+      // all -> keep "today" wording for backward compatibility
+    }
+
+    // Aggregates (unfiltered)
+    const totalOffices = rows.length;
+    const totalDevicesRequired = rows.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
+    const totalDevicesReceived = rows.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
+    const devicesInstalledRegion = rows.filter(r => (r.installationStatus||"").trim() === "Completed").length;
+
+    // Devices received for selected period
+    let devicesReceivedInPeriod = 0;
+    if (mode === 'single' && singleDMY){
+      devicesReceivedInPeriod = rows.reduce((s,l)=> s + (sameDMY(l.dateOfReceiptOfDevice, singleDMY) ? toInt(l.noOfDevicesReceived) : 0), 0);
+    } else if (mode === 'range' && startYMD && endYMD){
+      devicesReceivedInPeriod = rows.reduce((s,l)=> s + (inRange(l.dateOfReceiptOfDevice, startYMD, endYMD) ? toInt(l.noOfDevicesReceived) : 0), 0);
+    } else {
+      // all -> show "today" as before
+      devicesReceivedInPeriod = rows.reduce((s,l)=> s + (normalizeToDMY(l.dateOfReceiptOfDevice) === todayDMY ? toInt(l.noOfDevicesReceived) : 0), 0);
+    }
+
+    // Group by division
+    const byDiv = {};
+    rows.forEach(r=>{
+      const d = r.division || "—";
+      (byDiv[d] ||= []).push(r);
+    });
+
+    // Division entries (main table)
+    const entries = Object.entries(byDiv).sort(([a],[b])=>{
+      if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
+      if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
+      return a.localeCompare(b);
+    });
+
+    const divisions = entries.map(([division, arr])=>{
+      const offices = arr.length;
+      const req = arr.reduce((s,l)=> s + toInt(l.numberOfPosToBeDeployed), 0);
+      const rec = arr.reduce((s,l)=> s + toInt(l.noOfDevicesReceived), 0);
+      const pend = Math.max(0, req - rec);
+      const inst = arr.filter(x => (x.installationStatus||"").trim() === "Completed").length;
+      const pinst = Math.max(0, rec - inst);
+      const iss = arr.filter(x => {
+        const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
+        return t && t !== "none";
+      }).length;
+      const comp = inst;
+      const pct = req ? Math.round((inst/req)*100) : 0;
+      return { division, offices, req, rec, pend, inst, pinst, iss, comp, pct };
+    });
+
+    const totalsRow = {
+      division: "Total",
+      offices: totalOffices,
+      req: totalDevicesRequired,
+      rec: totalDevicesReceived,
+      pend: Math.max(0, totalDevicesRequired - totalDevicesReceived),
+      inst: devicesInstalledRegion,
+      pinst: Math.max(0, totalDevicesReceived - devicesInstalledRegion),
+      iss: rows.filter(x => {
+        const t = (x.issuesIfAny||"").toString().trim().toLowerCase();
+        return t && t !== "none";
+      }).length,
+      comp: devicesInstalledRegion,
+      pct: totalDevicesRequired ? Math.round((devicesInstalledRegion / totalDevicesRequired) * 100) : 0
+    };
+
+    // Build "Devices received ... — Division-wise" list for selected period
+    const periodGroups = entries.map(([division, arr])=>{
+      const items = arr
+        .filter(r => {
+          if (mode === 'single' && singleDMY){
+            return sameDMY(r.dateOfReceiptOfDevice, singleDMY) && toInt(r.noOfDevicesReceived) > 0;
+          } else if (mode === 'range' && startYMD && endYMD){
+            return inRange(r.dateOfReceiptOfDevice, startYMD, endYMD) && toInt(r.noOfDevicesReceived) > 0;
+          } else {
+            return normalizeToDMY(r.dateOfReceiptOfDevice) === todayDMY && toInt(r.noOfDevicesReceived) > 0;
+          }
+        })
+        .map(r => ({
+          division,
+          po: `${r.postOfficeName || ""}${r.postOfficeId ? " ("+r.postOfficeId+")" : ""}`,
+          n: toInt(r.noOfDevicesReceived)
+        }));
+
+      const total = items.reduce((s,x)=> s + x.n, 0);
+      return { division, items, total };
+    }).filter(g => g.items.length);
+
+    // PDF doc
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 32;
+    let y = margin;
+
+    // Colors / fonts (kept professional)
+    const headerFill = { r: 232, g: 236, b: 246 };
+    const stripeFill = { r: 248, g: 250, b: 255 };
+    const borderGray = 180;
+    const brandBlue = { r: 52, g: 152, b: 219 };
+
+    const fontTitle = 15;
+    const fontSub   = 11;
+    const fontHead  = 9.5;
+    const fontBody  = 9;
+    const lineH     = 11;
+    const padX      = 6;
+
+    // Table columns
+    const tableCols = [
+      { key:'division', label:'Division', align:'left'  },
+      { key:'offices',  label:'Offices', align:'center'},
+      { key:'req',      label:'Devices Required', align:'center'},
+      { key:'rec',      label:'Devices Received', align:'center'},
+      { key:'pend',     label:'Pending', align:'center'},
+      { key:'inst',     label:'Devices Installed', align:'center'},
+      { key:'pinst',    label:'Pending Installation', align:'center'},
+      { key:'iss',      label:'Offices with Issues', align:'center'},
+      { key:'comp',     label:'Completed', align:'center'},
+      { key:'pct',      label:'Completion %', align:'center'},
+    ];
+    const tableX = margin;
+    const tableW = pageW - margin*2;
+
+    // --- Auto-fit column widths (no word breaking, full-width fit) ---
+    function computeAutoWidths(){
+      const longestWordWidth = (text) => {
+        const s = (text ?? "").toString();
+        const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
+        if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
+        let w = 0;
+        for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
+        return w;
+      };
+
+      const baseMin = tableCols.map(c => c.key === 'division' ? 120 : 52);
+
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+      const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+      const headerNoBreakMin = tableCols.map(c => Math.ceil(longestWordWidth(c.label) + padX*2 + 4));
+
+      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+      const contentW = tableCols.map(() => 0);
+      const contentNoBreakMin = tableCols.map(() => 0);
+
+      const consider = obj => {
+        tableCols.forEach((c, i) => {
+          const raw = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
+          const w   = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
+          const nb  = Math.ceil(longestWordWidth(raw) + padX*2 + 2);
+          if (w  > contentW[i])          contentW[i]          = w;
+          if (nb > contentNoBreakMin[i]) contentNoBreakMin[i] = nb;
+        });
+      };
+      divisions.forEach(consider);
+      consider(totalsRow);
+
+      const minW = tableCols.map((_, i) =>
+        Math.max(baseMin[i], headerNoBreakMin[i], contentNoBreakMin[i])
+      );
+
+      let desired = tableCols.map((_, i) => Math.max(headerW[i], contentW[i], minW[i]));
+      const totalAvail = tableW;
+      let sum = desired.reduce((a,b)=>a+b,0);
+
+      if (sum > totalAvail){
+        let tries = 0;
+        while (sum > totalAvail && tries < 500){
+          let idx = -1, slackMax = -1;
+          for (let i=0;i<desired.length;i++){
+            const slack = desired[i] - minW[i];
+            if (slack > slackMax){ slackMax = slack; idx = i; }
+          }
+          if (idx < 0) break;
+          desired[idx] -= 1; sum -= 1; tries++;
+        }
+      }
+
+      if (sum < totalAvail){
+        let leftover = totalAvail - sum;
+        const priority = new Set(['division','pinst','req','rec','inst']);
+        while (leftover > 0){
+          let advanced = false;
+          for (let i=0;i<tableCols.length && leftover>0;i++){
+            if (priority.has(tableCols[i].key)) { desired[i] += 1; leftover--; advanced = true; }
+          }
+          if (!advanced){
+            for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i] += 1; leftover--; }
+          }
+        }
+      }
+
+      tableCols.forEach((c,i)=> c.w = desired[i]);
+    }
+
+    // helpers
+    function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
+    function ensureSpace(h){ if (y + h > pageH - margin) { newPage(); } }
+    function newPage(){ doc.addPage(); y = margin; drawHeader(); }
+    function centerBlockY(rowTop, rowH, lines){
+      const contentH = Math.max(lineH, lines.length * lineH);
+      return rowTop + (rowH - contentH)/2 + lineH*0.85;
+    }
+
+    // Header
+    function drawHeader(){
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontTitle);
+      doc.setTextColor(brandBlue.r, brandBlue.g, brandBlue.b);
+      doc.text('North Karnataka Region', margin, y); y += 18;
+
+      doc.setTextColor(0,0,0);
+      doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
+      doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
+
+      if (mode === 'single' && singleDMY){
+        doc.text(`Report for the date: ${singleDMY}`, margin, y); y += 8;
+      } else if (mode === 'range' && rangeStartDMY && rangeEndDMY){
+        doc.text(`Report period: ${rangeStartDMY} to ${rangeEndDMY}`, margin, y); y += 8;
+      } else {
+        doc.text(`Report for the date: ${todayDMY}`, margin, y); y += 8;
+      }
+
+      setBorder(); doc.line(margin, y, pageW - margin, y); y += 16;
+    }
+    drawHeader();
+
+    // Region Summary
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('Region Summary', margin, y); y += 12;
+
+    doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
+    const rsLeft = [
+      ['Total Offices', String(totalOffices)],
+      ['Total Devices required', String(totalDevicesRequired)]
+    ];
+    const rsRight = [
+      ['Total Devices received', String(totalDevicesReceived)],
+      [
+        (mode==='range' ? 'Devices received in period' : (mode==='single' ? 'Devices received that day' : 'Devices received today')),
+        String(devicesReceivedInPeriod)
+      ]
+    ];
+    const colGap = 260;
+    const valOffset = 190;
+
+    rsLeft.forEach(([k,v],i)=>{
+      ensureSpace(14);
+      doc.text(`${k}:`, margin, y);
+      doc.text(v, margin + valOffset, y, { align:'right' });
+      const pair = rsRight[i];
+      if (pair){
+        doc.text(`${pair[0]}:`, margin + colGap, y);
+        doc.text(pair[1], margin + colGap + valOffset, y, { align:'right' });
+      }
+      y += 14;
+    });
+    y += 6;
+
+    // Main table
+    computeAutoWidths();
+
+    function drawTableHeader(){
+      ensureSpace(24);
+      setBorder();
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+      const headerHeights = tableCols.map(c => {
+        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+        return Math.max(18, lines.length * lineH + 6);
+      });
+      const headerH = Math.max(...headerHeights);
+
+      doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
+      const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+      doc.rect(tableX, y, totalW, headerH, 'F');
+
+      // Per-cell borders + text
+      let x = tableX;  // FIX: ensure x is defined
+      tableCols.forEach(c=>{
+        doc.rect(x, y, c.w, headerH, 'S');
+        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+        const startY = centerBlockY(y, headerH, lines);
+
+        if (c.key === 'division') {
+          doc.text(lines, x + padX, startY, { align: 'left', lineHeightFactor: 1.25 });
+        } else {
+          lines.forEach((ln, i) => {
+            doc.text(ln, x + c.w / 2, startY + i * lineH, { align: 'center' });
+          });
+        }
+        x += c.w;
+      });
+
+      y += headerH;
+    }
+
+    function drawRow(obj, stripe=false, bold=false, bgFill=null){
+      doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(fontBody);
+      const cells = tableCols.map(col=>{
+        const raw = col.key === 'pct' ? `${obj[col.key]}%` : String(obj[col.key] ?? '');
+        const lines = doc.splitTextToSize(raw, col.w - padX*2);
+        const h = Math.max(16, lines.length * lineH + 6);
+        return { col, lines, h };
+      });
+      const rowH = Math.max(...cells.map(c => c.h));
+      ensureSpace(rowH);
+
+      const totalW = tableCols.reduce((s,c)=>s+c.w,0);
+      if (bgFill){
+        doc.setFillColor(bgFill.r, bgFill.g, bgFill.b);
+        doc.rect(tableX, y, totalW, rowH, 'F');
+      } else if (stripe){
+        doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
+        doc.rect(tableX, y, totalW, rowH, 'F');
+      }
+
+      setBorder();
+      let x = tableX;
+      cells.forEach(({col,lines})=>{
+        doc.rect(x, y, col.w, rowH, 'S');
+        const startY = centerBlockY(y, rowH, lines);
+        if (col.align === 'left'){
+          doc.text(lines, x + padX, startY, { align:'left', lineHeightFactor:1.25 });
+        } else {
+          lines.forEach((ln,i)=> doc.text(ln, x + col.w/2, startY + i*lineH, { align:'center' }));
+        }
+        x += col.w;
+      });
+      y += rowH;
+    }
+
+    // Render main table
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('Division-wise Detailed Report', margin, y); y += 8;
+    drawTableHeader();
+
+    divisions.forEach((r, idx) => {
+      if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
+      drawRow(r, idx % 2 === 1);
+    });
+    if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
+    drawRow(totalsRow, false, true, headerFill);
+
+    // ------ Devices received <period> — Division-wise list ------
+    if (periodGroups.length){
+      newPage();
+      doc.setFont('helvetica','bold'); doc.setFontSize(12);
+      doc.text(`Devices received ${devicesPeriodLabel} — Division-wise`, margin, y); y += 6;
+
+      const cols2 = [
+        { key:'division', label:'Division', align:'left'  },
+        { key:'po',       label:'Post Office', align:'left' },
+        { key:'n',        label:'Devices', align:'center' }
+      ];
+
+      // Flatten rows with group headers
+      const rows2 = [];
+      periodGroups.forEach(g=>{
+        rows2.push({ _group:true, division:g.division, total:g.total });
+        g.items.forEach(it => rows2.push({ division:g.division, po:it.po, n:it.n }));
+      });
+
+      // Auto widths for second table (NO WORD BREAKING + full-width fit)
+      const longestWordWidth2 = (text) => {
+        const s = (text ?? "").toString();
+        const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
+        if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
+        let w = 0;
+        for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
+        return w;
+      };
+
+      const baseMin2 = [120, 240, 90];
+
+      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+      const headW2  = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+      const headNB2 = cols2.map(c => Math.ceil(longestWordWidth2(c.label) + padX*2 + 4));
+
+      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+      const contentW2  = cols2.map(() => 0);
+      const contentNB2 = cols2.map(() => 0);
+
+      rows2.forEach(r=>{
+        cols2.forEach((c,i)=>{
+          const raw = r._group
+            ? (c.key==='division' ? `${r.division}  —  Total: ${r.total}` : '')
+            : String(r[c.key] ?? '');
+          const w  = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
+          const nb = Math.ceil(longestWordWidth2(raw) + padX*2 + 2);
+          if (w  > contentW2[i])  contentW2[i]  = w;
+          if (nb > contentNB2[i]) contentNB2[i] = nb;
+        });
+      });
+
+      const min2 = cols2.map((_,i)=> Math.max(baseMin2[i], headNB2[i], contentNB2[i]));
+      let desired2 = cols2.map((_,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
+      const tableW2 = pageW - margin*2;
+      let sum2 = desired2.reduce((a,b)=>a+b,0);
+
+      if (sum2 > tableW2){
+        let tries = 0;
+        while (sum2 > tableW2 && tries < 600){
+          let idx = -1, slackMax = -1;
+          for (let i=0;i<desired2.length;i++){
+            const slack = desired2[i] - min2[i];
+            if (slack > slackMax){ slackMax = slack; idx = i; }
+          }
+          if (idx < 0) break;
+          desired2[idx] -= 1; sum2 -= 1; tries++;
+        }
+      } else if (sum2 < tableW2){
+        let leftover = tableW2 - sum2;
+        while (leftover > 0){
+          if (leftover > 0){ desired2[1] += 1; leftover--; }
+          for (let i=0;i<desired2.length && leftover>0;i++){ desired2[i] += 1; leftover--; }
+        }
+      }
+
+      cols2.forEach((c,i)=> c.w = desired2[i]);
+
+      // Draw header
+      const drawHeader2 = ()=>{
+        ensureSpace(22);
+        setBorder();
+        const headerH = 22;
+        doc.setFillColor(headerFill.r, headerFill.g, headerFill.b);
+        doc.rect(margin, y, tableW2, headerH, 'F');
+        let xx = margin;
+        cols2.forEach(c=>{
+          doc.rect(xx, y, c.w, headerH, 'S');
+          doc.text(c.label, c.align==='left' ? xx+padX : xx + c.w/2, y + 14, { align: c.align==='left'?'left':'center' });
+          xx += c.w;
+        });
+        y += headerH;
+      };
+      drawHeader2();
+
+      // Draw rows
+      rows2.forEach((r)=>{
+        if (r._group){
+          const text = `${r.division} — Total: ${r.total}`;
+          const h = 18;
+          ensureSpace(h);
+          doc.setFillColor(stripeFill.r, stripeFill.g, stripeFill.b);
+          doc.rect(margin, y, tableW2, h, 'F');
+          setBorder(); doc.rect(margin, y, tableW2, h, 'S');
+          doc.setFont('helvetica','bold'); doc.setFontSize(fontBody);
+          doc.text(text, margin + padX, y + 12);
+          y += h;
+        } else {
+          doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+          const h = 18;
+          ensureSpace(h);
+          let xx = margin;
+          setBorder();
+          cols2.forEach((c)=>{
+            const raw = String(r[c.key] ?? '');
+            doc.rect(xx, y, c.w, h, 'S');
+            if (c.align === 'left'){
+              doc.text(raw, xx + padX, y + 12);
+            } else {
+              doc.text(raw, xx + c.w/2, y + 12, { align:'center' });
+            }
+            xx += c.w;
+          });
+          y += h;
+        }
+      });
+    }
+
+    // Footer: page numbers + generation date (DD/MM/YYYY)
+    const pages = doc.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(9);
+
+      const _gen = new Date();
+      const _dd  = String(_gen.getDate()).padStart(2, '0');
+      const _mm  = String(_gen.getMonth() + 1).padStart(2, '0');
+      const _yy  = _gen.getFullYear();
+      const generatedOnDMY = `${_dd}/${_mm}/${_yy}`;
+
+      doc.text(`Generated on ${generatedOnDMY}`, pageW - margin, pageH - 12, { align: 'right' });
+      doc.text(`Page ${i} / ${pages}`,        margin,        pageH - 12, { align: 'left'  });
+    }
+
+    const outStamp = new Date().toISOString().slice(0,10);
+    const suffix = (mode==='single' && opts.reportDate)
+      ? `_Date-${opts.reportDate}`
+      : (mode==='range' && opts.startDate && opts.endDate) ? `_Range-${opts.startDate}_to_${opts.endDate}` : '';
+    doc.save(`NKR_POS_Deployment_Report_${outStamp}${suffix}.pdf`);
+  }
+
   _pdfSimple(title){
     if (!window.jspdf?.jsPDF) { alert("PDF library not loaded. Please refresh."); return; }
     const { jsPDF } = window.jspdf; const doc=new jsPDF();
     doc.setFontSize(20); doc.text(title,20,30);
     doc.setFontSize(12);
-    const d = new Date();
-    const dd = String(d.getDate()).padStart(2,'0');
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const yy = d.getFullYear();
-    doc.text(`Generated on: ${dd}/${mm}/${yy}`, 20, 45);
+    {
+      const d = new Date();
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const yy = d.getFullYear();
+      doc.text(`Generated on: ${dd}/${mm}/${yy}`, 20, 45);
+    }
     doc.text(`Generated by: ${this.currentUser||"User"}`,20,55);
     doc.save(`${title.replace(/\s+/g,'-')}-${new Date().toISOString().slice(0,10)}.pdf`);
   }
@@ -1089,25 +1630,129 @@ class AdvancedPOSTracker {
   // ---- Excel import/export ----
   downloadTemplate(){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
-    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPORTED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
+    const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
     const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Office','Contact Person','9876543210','9876543211','contact@postoffice.gov.in','Sample Address','Sample Location','Sample City','Sample State','123456',5,'EZETAP ANDROID X990','',0,'','Pending','Not Tested','None'];
     const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]); XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
   }
-  exportCurrentData(){
+
+  // Backward compatible: export all data unless date filters are supplied
+  exportCurrentData(opts){
     if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
     const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];
-    const rows=(this.locations||[]).map(l=>[
+
+    const parseYMD = (ymd)=> { const d=new Date(ymd+"T00:00:00"); return isNaN(d)? null : d; };
+    const parseAnyToYMDDate = (v)=>{
+      if (!v) return null;
+      const s = String(v).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return parseYMD(s);
+      let dd,mm,yy;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)){ [dd,mm,yy]=s.split("/"); return parseYMD(`${yy}-${mm}-${dd}`); }
+      if (/^\d{2}-\d{2}-\d{4}$/.test(s)){ [dd,mm,yy]=s.split("-"); return parseYMD(`${yy}-${mm}-${dd}`); }
+      const d=new Date(s); return isNaN(d)? null: new Date(d.getFullYear(),d.getMonth(),d.getDate());
+    };
+    const inRange = (val, sYMD, eYMD)=>{
+      if (!sYMD && !eYMD) return true;
+      const d = parseAnyToYMDDate(val);
+      if (!d) return false;
+      const s = sYMD ? parseYMD(sYMD) : null;
+      const e = eYMD ? parseYMD(eYMD) : null;
+      if (s && d < s) return false;
+      if (e && d > e) return false;
+      return true;
+    };
+    const sameDay = (val, ymd)=>{
+      if (!ymd) return true;
+      const d = parseAnyToYMDDate(val);
+      const s = parseYMD(ymd);
+      if (!d || !s) return false;
+      return d.getTime() === s.getTime();
+    };
+
+    let rowsSrc = this.locations;
+    if (opts && opts.reportMode === 'single' && opts.reportDate){
+      rowsSrc = rowsSrc.filter(l => sameDay(l.dateOfReceiptOfDevice, opts.reportDate));
+    } else if (opts && opts.reportMode === 'range' && opts.startDate && opts.endDate){
+      rowsSrc = rowsSrc.filter(l => inRange(l.dateOfReceiptOfDevice, opts.startDate, opts.endDate));
+    }
+
+    const rows=rowsSrc.map(l=>[
       l.slNo||'',l.division||'',l.postOfficeName||'',l.postOfficeId||'',l.officeType||'',
       l.contactPersonName||'',l.contactPersonNo||'',l.altContactNo||'',l.contactEmail||'',
       l.locationAddress||'',l.location||'',l.city||'',l.state||'',l.pincode||'',
       l.numberOfPosToBeDeployed||'',l.typeOfPosTerminal||'',l.dateOfReceiptOfDevice||'',
       l.noOfDevicesReceived||'',l.serialNo||'',l.installationStatus||'',l.functionalityStatus||'',l.issuesIfAny||''
     ]);
-    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,...rows]); XLSX.utils.book_append_sheet(wb,ws,"POS Data");
-    XLSX.writeFile(wb,`POS_Data_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
-  }
-  exportToExcel(){ this.exportCurrentData(); }
 
+    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,...rows]); XLSX.utils.book_append_sheet(wb,ws,"POS Data");
+    const suffix = (opts && opts.reportMode==='single' && opts.reportDate)
+      ? `_Date-${opts.reportDate}`
+      : (opts && opts.reportMode==='range' && opts.startDate && opts.endDate)
+        ? `_Range-${opts.startDate}_to_${opts.endDate}`
+        : '';
+    XLSX.writeFile(wb,`POS_Data_Export_${new Date().toISOString().slice(0,10)}${suffix}.xlsx`);
+  }
+
+  // Optional helper: shows a small dialog to export Excel by single date / range (no impact if unused)
+  exportDataWithDialog(){
+    if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
+    const id = "excel-export-overlay";
+    if (document.getElementById(id)) return;
+    const todayYMD = new Date().toISOString().slice(0,10);
+    const overlay = document.createElement("div");
+    overlay.id = id;
+    overlay.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:420px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+          <h3 style="margin:0 0 10px;font-size:16px;color:#2c3e50;">Export Data (Excel)</h3>
+
+          <div style="margin:6px 0 6px;font-size:13px;color:#34495e;"><strong>Period</strong></div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="radio" name="xl-period" value="all" checked> All data
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="radio" name="xl-period" value="single"> Single date:
+              <input id="xl-date" type="date" value="${todayYMD}" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+              <input type="radio" name="xl-period" value="range"> Date range:
+              <input id="xl-start" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              <span style="opacity:.7">to</span>
+              <input id="xl-end" type="date" value="${todayYMD}" style="padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+            </label>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+            <button id="xl-cancel" class="btn btn-sm btn-secondary" style="padding:8px 14px;">Cancel</button>
+            <button id="xl-generate" class="btn btn-sm btn-primary" style="padding:8px 14px;">Export</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const sync = () => {
+      const v = overlay.querySelector('input[name="xl-period"]:checked')?.value;
+      overlay.querySelector('#xl-date').disabled  = (v!=='single');
+      overlay.querySelector('#xl-start').disabled = (v!=='range');
+      overlay.querySelector('#xl-end').disabled   = (v!=='range');
+    };
+    overlay.querySelectorAll('input[name="xl-period"]').forEach(r=> r.addEventListener('change', sync));
+    sync();
+
+    overlay.querySelector("#xl-cancel").onclick = ()=> overlay.remove();
+    overlay.querySelector("#xl-generate").onclick = ()=>{
+      const v = overlay.querySelector('input[name="xl-period"]:checked')?.value || 'all';
+      const date  = overlay.querySelector('#xl-date')?.value || "";
+      const start = overlay.querySelector('#xl-start')?.value || "";
+      const end   = overlay.querySelector('#xl-end')?.value || "";
+      overlay.remove();
+      if (v==='single') this.exportCurrentData({ reportMode:'single', reportDate:date });
+      else if (v==='range') this.exportCurrentData({ reportMode:'range', startDate:start, endDate:end });
+      else this.exportCurrentData();
+    };
+  }
+
+  exportToExcel(){ this.exportCurrentData(); }
   showImportModal(){ document.getElementById("importModal").style.display="block"; }
   closeImportModal(){ document.getElementById("importModal").style.display="none"; document.getElementById("importPreview").classList.add("hidden"); document.getElementById("excelFileInput").value=""; }
   handleExcelImport(event){
@@ -1148,13 +1793,12 @@ class AdvancedPOSTracker {
   }
   showImportPreview(){
     const el=document.getElementById("importPreviewContent");
-    if (!el) return;
     let html=`<div class="alert alert-success"><strong>✅ Ready to import ${this.importData.length} locations</strong></div>
       <div style="max-height:300px;overflow-y:auto;">
       <table class="data-table"><thead><tr><th>Post Office</th><th>Division</th><th>City</th><th>Status</th></tr></thead><tbody>`;
     this.importData.slice(0,10).forEach(l=>{ html+=`<tr><td>${l.postOfficeName}</td><td>${l.division}</td><td>${l.city}</td><td>${l.installationStatus}</td></tr>`; });
     html+=`</tbody></table></div>`; if (this.importData.length>10) html+=`<p><em>Showing first 10 of ${this.importData.length} locations</em></p>`;
-    el.innerHTML=html; document.getElementById("importPreview")?.classList.remove("hidden");
+    el.innerHTML=html; document.getElementById("importPreview").classList.remove("hidden");
   }
   confirmImport(){
     if (!confirm(`This will replace all existing data with ${this.importData.length} uploaded rows. Continue?`)) return;
@@ -1162,14 +1806,14 @@ class AdvancedPOSTracker {
     const maxId=this.locations.reduce((m,l)=>Math.max(m,l.id||0),0); this.nextLocationId=maxId+1;
     this.saveToStorage(); this.closeImportModal(); this.updateDashboard(); alert(`Imported ${this.importData.length} locations!`); this.importData=[];
   }
-  cancelImport(){ this.importData=[]; document.getElementById("importPreview")?.classList.add("hidden"); }
+  cancelImport(){ this.importData=[]; document.getElementById("importPreview").classList.add("hidden"); }
 
   createBackup(){
     const payload={ locations:this.locations, nextLocationId:this.nextLocationId, backupDate:new Date().toISOString(), version:"1.0" };
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`POS_Backup_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url);
   }
-  restoreBackup(){ document.getElementById("backupFileInput")?.click(); }
+  restoreBackup(){ document.getElementById("backupFileInput").click(); }
   handleBackupRestore(event){
     const file=event.target.files?.[0]; if (!file) return;
     const reader=new FileReader();
@@ -1191,21 +1835,4 @@ class AdvancedPOSTracker {
   }
 }
 
-// ---- Boot + tiny global shims for old inline onclicks ----
 window.tracker = new AdvancedPOSTracker();
-window.addEventListener('DOMContentLoaded', () => tracker.init());
-
-window.showLocationForm   = () => tracker.showLocationForm();
-window.closeLocationModal = () => tracker.closeLocationModal();
-window.showImportModal    = () => tracker.showImportModal();
-window.closeImportModal   = () => tracker.closeImportModal();
-window.exportToExcel      = () => tracker.exportToExcel();
-window.downloadTemplate   = () => tracker.downloadTemplate();
-window.exportDashboardPDF = () => tracker.exportDashboardPDF();
-window.exportProgressPDF  = () => tracker.exportProgressPDF();
-window.exportReportsPDF   = (opts) => tracker.exportReportsPDF(opts);
-window.createBackup       = () => tracker.createBackup();
-window.restoreBackup      = () => tracker.restoreBackup();
-window.handleBackupRestore= (e) => tracker.handleBackupRestore(e);
-window.confirmImport      = () => tracker.confirmImport();
-window.cancelImport       = () => tracker.cancelImport();

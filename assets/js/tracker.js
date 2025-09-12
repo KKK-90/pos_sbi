@@ -1,4 +1,4 @@
-// Advanced POS Deployment Tracker (static, PWA, localStorage "DB")
+// Advanced POS Deployment Tracker (static, PWA, localStorage "DB")// Advanced POS Deployment Tracker (static, PWA, localStorage "DB")
 
 class AdvancedPOSTracker {
 constructor() {
@@ -15,6 +15,10 @@ this.officeFilters = {};                         // per-column (inline) text fil
 this.topFilters = { division:"", install:"", func:"", blanks:"all" }; // toolbar dropdowns
 this.docStorageKey = "advancedPOSTrackerDocs";   // localStorage key for PDF blobs
 this.uploadAllowedUsers = null;                  // null => everyone; or restrict e.g. ["NKR","SBI_DOP"]
+    this.progressSelection = new Set();   // selected row ids (on Progress tab)
+    this._progressLastIds = [];           // last rendered ids for "select all in view"
+    this._progressBarWired = false;       // event wiring guard
+  }
 }
 
 async init() {
@@ -90,14 +94,15 @@ if (btn.getAttribute("onclick")?.includes(`'${tabName}'`)) btn.classList.add("ac
 switch (tabName) {
 case "dashboard": this.updateDashboard(); break;
 case "locations": this.renderOfficeDetails(); break;   // OWD table
-case "progress": this.displayProgress(); this.updateProgressFilters(); break;
-      case "reports": this.generateReports(); this._wireExportReportsPdfForm();   // NEW: ensure the dialog’s Generate works
-    break;
-
-      case "reports":
-        this.generateReports();
-        this._wireExportReportsPdfForm();   // PATCH A: ensure the dialog’s Generate works
-        break;
+      case "progress": this.displayProgress(); this.updateProgressFilters(); break;
+      case "progress":  this.displayProgress(); this.updateProgressFilters();
+                        this._ensureProgressBulkUI();          // PATCH C: add bulk bar/actions
+                        this.filterProgress();                 // render with current filters & update selection bar
+                        break;
+case "reports":
+this.generateReports();
+this._wireExportReportsPdfForm();   // PATCH A: ensure the dialog’s Generate works
+break;
 case "data-management": this.updateDataStatistics && this.updateDataStatistics(); break;
 }
 }
@@ -193,44 +198,111 @@ document.getElementById("recentActivity").innerHTML = html;
 // ---- legacy lists / progress (frozen) ----
 filterByDivision(name){ this.showTab(null,"progress"); const sel=document.getElementById("progressDivisionFilter"); if (sel){ sel.value=name; this.filterProgressByDivision(); } }
 displayLocations(){ this.renderLocationsList(this.locations, "locationsList"); }
+  renderLocationsList(list, targetId="locationsList"){
+    const target = document.getElementById(targetId);
+    if (!list.length) {
+      target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
+        <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
+      return;
+    }
+    let html = "";
+    list.forEach(l=>{
+      const statusClass = this.getStatusClass(l.installationStatus);
+      const pct = this.calculateProgress(l);
+      html += `
+      <div class="location-card">
+        <div class="location-header">
+          <div class="location-title">${l.postOfficeName} (${l.postOfficeId})</div>
+          <div class="flex gap-10">
+            <span class="status-badge ${statusClass}">${l.installationStatus}</span>
 renderLocationsList(list, targetId="locationsList"){
-const target = document.getElementById(targetId);
-if (!list.length) {
-target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
-       <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
-return;
-}
-let html = "";
-list.forEach(l=>{
-const statusClass = this.getStatusClass(l.installationStatus);
-const pct = this.calculateProgress(l);
-html += `
-     <div class="location-card">
-       <div class="location-header">
-         <div class="location-title">${l.postOfficeName} (${l.postOfficeId})</div>
-         <div class="flex gap-10">
-           <span class="status-badge ${statusClass}">${l.installationStatus}</span>
+  const target = document.getElementById(targetId);
+  if (!target) return;
+
+  // PATCH C: bind one delegated listener per target container
+  if (!target._bulkBound){
+    target._bulkBound = true;
+    target.addEventListener("change", (e)=>{
+      const cb = e.target.closest('input[type="checkbox"][data-sel-id]');
+      if (!cb) return;
+      const id = parseInt(cb.getAttribute("data-sel-id"), 10);
+      if (Number.isFinite(id)){
+        if (cb.checked) this.progressSelection.add(id);
+        else this.progressSelection.delete(id);
+        this._updateProgressSelectionBar();
+      }
+    });
+  }
+
+  if (!list.length) {
+    target.innerHTML = `<div class="alert alert-info"><h4>No Post Office found</h4><p>Add Post Offices to get started.</p>
+      <button class="btn btn-primary" onclick="showLocationForm()">Add Post Office(s)</button></div>`;
+    return;
+  }
+
+  const isProgress = (targetId === "progressList");
+  let html = "";
+  list.forEach(l=>{
+    const statusClass = this.getStatusClass(l.installationStatus);
+    const pct = this.calculateProgress(l);
+
+    // PATCH C: selection checkbox for Progress cards only
+    const selBox = isProgress
+      ? `<label style="display:flex;align-items:center;gap:6px;">
+           <input type="checkbox" data-sel-id="${l.id}" ${this.progressSelection.has(l.id) ? "checked":""}>
+           <span style="font-size:12px;opacity:.75;">Select</span>
+         </label>`
+      : "";
+
+    html += `
+    <div class="location-card">
+      <div class="location-header">
+        <div class="location-title">${l.postOfficeName} ${l.postOfficeId ? `(${l.postOfficeId})` : ""}</div>
+        <div class="flex gap-10" style="gap:10px;align-items:center;">
+          ${selBox}
+          <span class="status-badge ${statusClass}">${l.installationStatus}</span>
+          ${!isProgress ? `
            <button class="btn btn-sm btn-primary" onclick="tracker.editLocation(${l.id})">✏️ Edit</button>
            <button class="btn btn-sm btn-danger" onclick="tracker.deleteLocation(${l.id})">🗑️ Delete</button>
-         </div>
+          </div>
+          ` : ""}
        </div>
-       <div class="location-details">
-         <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
-         <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
-         <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
-         <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city}, ${l.state}</div></div>
-         <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
-         <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
-       </div>
-       <div style="margin-top:20px;">
-         <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
-           <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
-         <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-       </div>
-     </div>`;
-});
-target.innerHTML = html;
+        <div class="location-details">
+          <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
+          <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
+          <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
+          <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city}, ${l.state}</div></div>
+          <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
+          <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
+        </div>
+        <div style="margin-top:20px;">
+          <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
+            <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>
+      </div>`;
+    });
+    target.innerHTML = html;
+  }
+      </div>
+      <div class="location-details">
+        <div class="detail-item"><div class="detail-label">Division</div><div class="detail-value">${l.division}</div></div>
+        <div class="detail-item"><div class="detail-label">Contact</div><div class="detail-value">${l.contactPersonName}</div></div>
+        <div class="detail-item"><div class="detail-label">Phone</div><div class="detail-value">${l.contactPersonNo}</div></div>
+        <div class="detail-item"><div class="detail-label">City, State</div><div class="detail-value">${l.city||""}${l.state?`, ${l.state}`:""}</div></div>
+        <div class="detail-item"><div class="detail-label">POS Required</div><div class="detail-value">${l.numberOfPosToBeDeployed}</div></div>
+        <div class="detail-item"><div class="detail-label">Devices Received</div><div class="detail-value">${l.noOfDevicesReceived || 0}</div></div>
+      </div>
+      <div style="margin-top:20px;">
+        <div class="flex-between mb-10"><span style="font-weight:600;">Deployment Progress</span>
+          <span style="font-weight:700;color:var(--accent-color);">${pct}%</span></div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      </div>
+    </div>`;
+  });
+  target.innerHTML = html;
 }
+
 updateFilters(){
 const divisions=[...new Set(this.locations.map(l=>l.division))];
 const sel=document.getElementById("divisionFilter");
@@ -254,23 +326,227 @@ const divisions=[...new Set(this.locations.map(l=>l.division))];
 const sel=document.getElementById("progressDivisionFilter");
 if (sel){ sel.innerHTML=`<option value="">All Divisions</option>`; divisions.forEach(d=> sel.innerHTML+=`<option value="${d}">${d}</option>`); }
 }
+
+// ===== PATCH C: Progress bulk actions =====
+_ensureProgressBulkUI(){
+  const host = document.querySelector('#progress');
+  if (!host) return;
+
+  // Create a slim action bar under existing filters, only once
+  let bar = document.getElementById('progress-bulk-bar');
+  if (!bar){
+    bar = document.createElement('div');
+    bar.id = 'progress-bulk-bar';
+    bar.style.display = 'flex';
+    bar.style.flexWrap = 'wrap';
+    bar.style.gap = '8px';
+    bar.style.alignItems = 'center';
+    bar.style.margin = '10px 0 14px';
+    bar.innerHTML = `
+      <span id="progress-selected-pill" class="badge" style="background:#eef3ff;color:#234; padding:6px 10px;border-radius:999px;font-size:12px;">
+        Selected: <strong id="progress-selected-count">0</strong>
+      </span>
+      <button id="progress-select-all"   class="btn btn-sm btn-secondary">Select all in view</button>
+      <button id="progress-clear-sel"    class="btn btn-sm btn-light">Clear selection</button>
+      <button id="progress-bulk-update"  class="btn btn-sm btn-primary">Bulk update</button>
+    `;
+    // place after filters if available
+    const filtersRow = host.querySelector('.filters') || host;
+    filtersRow.parentElement.insertBefore(bar, filtersRow.nextSibling);
+  }
+
+  if (!this._progressBarWired){
+    this._progressBarWired = true;
+    document.getElementById('progress-select-all')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(true));
+    document.getElementById('progress-clear-sel')?.addEventListener('click', ()=> this._toggleProgressSelectAllCurrent(false));
+    document.getElementById('progress-bulk-update')?.addEventListener('click', ()=> this._openBulkUpdateModal());
+  }
+
+  this._updateProgressSelectionBar();
+}
+
+_updateProgressSelectionBar(){
+  const n = this.progressSelection.size;
+  const pill = document.getElementById('progress-selected-count');
+  if (pill) pill.textContent = String(n);
+}
+
+_toggleProgressSelectAllCurrent(select=true){
+  (this._progressLastIds || []).forEach(id => {
+    if (select) this.progressSelection.add(id); else this.progressSelection.delete(id);
+  });
+  this.filterProgress(); // re-render to reflect checkbox states & update count
+}
+
+_clearProgressSelection(){
+  this.progressSelection.clear();
+  this.filterProgress();
+}
+
+_openBulkUpdateModal(){
+  if (this.progressSelection.size === 0){
+    alert('Select at least one Post Office in the list to bulk update.');
+    return;
+  }
+  const id = 'bulk-update-overlay';
+  if (document.getElementById(id)) return;
+
+  const today = new Date().toISOString().slice(0,10);
+  const modal = document.createElement('div');
+  modal.id = id;
+  modal.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2500;display:flex;align-items:center;justify-content:center;">
+      <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:18px 20px;width:520px;max-width:90vw;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+        <h3 style="margin:0 0 6px;font-size:16px;color:#2c3e50;">Bulk update (${this.progressSelection.size} selected)</h3>
+        <p style="margin:0 0 12px;font-size:12.5px;opacity:.8;">Leave a field blank to keep its current value.</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Installation status</span>
+            <select id="bulk-install" class="filter-select" style="padding:7px 8px;">
+              <option value="">(keep)</option>
+              <option>Pending</option>
+              <option>Device Received</option>
+              <option>In Progress</option>
+              <option>Completed</option>
+            </select>
+          </label>
+
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Functionality status</span>
+            <select id="bulk-func" class="filter-select" style="padding:7px 8px;">
+              <option value="">(keep)</option>
+              <option>Not Tested</option>
+              <option>Working</option>
+              <option>Not Working</option>
+            </select>
+          </label>
+
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Date of receipt of device</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="bulk-date" type="date" style="flex:1;padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+              <button id="bulk-set-today" class="btn btn-sm btn-light" type="button">Today</button>
+            </div>
+          </label>
+
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>No. of devices received</span>
+            <input id="bulk-devices" type="number" min="0" step="1" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+          </label>
+
+          <label style="grid-column:1 / -1; display:flex;flex-direction:column;gap:6px;font-size:13px;">
+            <span>Issues (if any)</span>
+            <input id="bulk-issues" type="text" placeholder="(keep)" style="padding:7px 8px;border:1px solid #dfe4ea;border-radius:6px;">
+            <div style="display:flex;gap:10px;align-items:center;margin-top:4px;">
+              <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;">
+                <input id="bulk-clear-issues" type="checkbox"> <span>Set to “None”</span>
+              </label>
+            </div>
+          </label>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+          <button id="bulk-cancel" class="btn btn-sm btn-secondary">Cancel</button>
+          <button id="bulk-apply"  class="btn btn-sm btn-primary">Apply</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#bulk-set-today')?.addEventListener('click', ()=>{
+    const el = modal.querySelector('#bulk-date'); if (el) el.value = today;
+  });
+  modal.querySelector('#bulk-cancel')?.addEventListener('click', ()=> modal.remove());
+  modal.querySelector('#bulk-apply')?.addEventListener('click', ()=>{
+    const payload = {
+      installationStatus: modal.querySelector('#bulk-install')?.value || "",
+      functionalityStatus: modal.querySelector('#bulk-func')?.value || "",
+      dateOfReceiptOfDevice: modal.querySelector('#bulk-date')?.value || "",
+      noOfDevicesReceived: modal.querySelector('#bulk-devices')?.value || "",
+      issuesIfAny: modal.querySelector('#bulk-clear-issues')?.checked ? "None" : (modal.querySelector('#bulk-issues')?.value || "")
+    };
+    modal.remove();
+    this._applyBulkUpdate(payload);
+  });
+}
+
+_applyBulkUpdate(payload){
+  // normalize & apply only provided fields
+  const has = (v)=> v !== null && v !== undefined && String(v).trim() !== "";
+  let changed = 0;
+
+  const toInt = (v)=> {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const updates = {
+    installationStatus: has(payload.installationStatus) ? String(payload.installationStatus) : null,
+    functionalityStatus: has(payload.functionalityStatus) ? String(payload.functionalityStatus) : null,
+    dateOfReceiptOfDevice: has(payload.dateOfReceiptOfDevice) ? String(payload.dateOfReceiptOfDevice) : null,
+    noOfDevicesReceived: has(payload.noOfDevicesReceived) ? toInt(payload.noOfDevicesReceived) : null,
+    issuesIfAny: (payload.issuesIfAny === "None") ? "None" : (has(payload.issuesIfAny) ? String(payload.issuesIfAny) : null)
+  };
+
+  const selected = new Set(this.progressSelection);
+  if (!selected.size) { alert("Selection cleared. Nothing to update."); return; }
+
+  this.locations = this.locations.map(l=>{
+    if (!selected.has(l.id)) return l;
+    const next = { ...l };
+    if (updates.installationStatus !== null) next.installationStatus = updates.installationStatus;
+    if (updates.functionalityStatus !== null) next.functionalityStatus = updates.functionalityStatus;
+    if (updates.dateOfReceiptOfDevice !== null) next.dateOfReceiptOfDevice = updates.dateOfReceiptOfDevice;
+    if (updates.noOfDevicesReceived !== null) next.noOfDevicesReceived = updates.noOfDevicesReceived;
+    if (updates.issuesIfAny !== null) next.issuesIfAny = updates.issuesIfAny;
+    changed++;
+    return next;
+  });
+
+  this.saveToStorage();
+  this.updateDashboard();
+  this.filterProgress(); // re-render and refresh selection bar
+  alert(`Updated ${changed} record(s) successfully.`);
+}
+
+
 filterProgressByDivision(){
 const d=document.getElementById("progressDivisionFilter").value;
 const list = d ? this.locations.filter(l=>l.division===d) : this.locations;
 this.renderLocationsList(list,"progressList");
 }
+  filterProgress(){
+    const term=(document.getElementById("progressSearchInput").value||"").toLowerCase();
+    const status=document.getElementById("progressStatusFilter").value;
+    const div=document.getElementById("progressDivisionFilter").value;
+    const filtered=this.locations.filter(l=>{
+      const matchesSearch = [l.postOfficeName,l.division].some(v=> (v||"").toLowerCase().includes(term));
+      const matchesStatus = !status || l.installationStatus===status;
+      const matchesDivision = !div || l.division===div;
+      return matchesSearch && matchesStatus && matchesDivision;
+    });
+    this.renderLocationsList(filtered,"progressList");
+  }
 filterProgress(){
-const term=(document.getElementById("progressSearchInput").value||"").toLowerCase();
-const status=document.getElementById("progressStatusFilter").value;
-const div=document.getElementById("progressDivisionFilter").value;
-const filtered=this.locations.filter(l=>{
-const matchesSearch = [l.postOfficeName,l.division].some(v=> (v||"").toLowerCase().includes(term));
-const matchesStatus = !status || l.installationStatus===status;
-const matchesDivision = !div || l.division===div;
-return matchesSearch && matchesStatus && matchesDivision;
-});
-this.renderLocationsList(filtered,"progressList");
+  const term=(document.getElementById("progressSearchInput").value||"").toLowerCase();
+  const status=document.getElementById("progressStatusFilter").value;
+  const div=document.getElementById("progressDivisionFilter").value;
+  const filtered=this.locations.filter(l=>{
+    const matchesSearch = [l.postOfficeName,l.division].some(v=> (v||"").toLowerCase().includes(term));
+    const matchesStatus = !status || l.installationStatus===status;
+    const matchesDivision = !div || l.division===div;
+    return matchesSearch && matchesStatus && matchesDivision;
+  });
+
+  // PATCH C: remember what’s in view (for “Select all in view”)
+  this._progressLastIds = filtered.map(l => l.id);
+
+  this.renderLocationsList(filtered,"progressList");
+  this._updateProgressSelectionBar(); // PATCH C: refresh selected count
 }
+
 
 // ---- reports (frozen UI; PDF enhanced below) ----
 generateReports(){
@@ -311,14 +587,10 @@ if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
 return a.localeCompare(b);
 });
 
-      const tdC = ' style="text-align:center"';
-      const thL = ' style="text-align:left"';
-      const thC = ' style="text-align:center"';
-      const tableRows = entries.map(([division, arr]) => {
-    const tdC = ' style="text-align:center"';
-    const thL = ' style="text-align:left"';
-    const thC = ' style="text-align:center"';
-    const tableRows = entries.map(([division, arr]) => {
+const tdC = ' style="text-align:center"';
+const thL = ' style="text-align:left"';
+const thC = ' style="text-align:center"';
+const tableRows = entries.map(([division, arr]) => {
 const offices = arr.length;
 const devicesRequired = arr.reduce((s,l)=> s + (parseInt(l.numberOfPosToBeDeployed)||0), 0);
 const devicesReceived = arr.reduce((s,l)=> s + (parseInt(l.noOfDevicesReceived)||0), 0);
@@ -366,56 +638,30 @@ const totalRow = `
    `;
 
 const divisionsHTML = `
-  <div class="section-header" style="margin-top:20px;">
-    <h3 class="section-title">Division-wise Detailed Report</h3>
-  </div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th${thL}>Division</th>
-        <th${thC}>Offices</th>
-        <th${thC}>Devices Required</th>
-        <th${thC}>Devices Received</th>
-        <th${thC}>Pending</th>
-        <th${thC}>Devices installed</th>
-        <th${thC}>Installations Pending</th>
-        <th${thC}>Offices with Issues</th>
-        <th${thC}>Completed</th>
-        <th${thC}>Completion %</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
-      ${totalRow}
-    </tbody>
-  </table>
-`;
-
-    const divisionsHTML = `
-      <div class="section-header" style="margin-top:20px;">
-        <h3 class="section-title">Division-wise Detailed Report</h3>
-      </div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th${thL}>Division</th>
-            <th${thC}>Offices</th>
-            <th${thC}>Devices Required</th>
-            <th${thC}>Devices Received</th>
-            <th${thC}>Pending</th>
-            <th${thC}>Devices installed</th>
-            <th${thC}>Installations Pending</th>
-            <th${thC}>Issues</th>
-            <th${thC}>Completed</th>
-            <th${thC}>Completion %</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
-          ${totalRow}
-        </tbody>
-      </table>
-    `;
+     <div class="section-header" style="margin-top:20px;">
+       <h3 class="section-title">Division-wise Detailed Report</h3>
+     </div>
+     <table class="data-table">
+       <thead>
+         <tr>
+           <th${thL}>Division</th>
+           <th${thC}>Offices</th>
+           <th${thC}>Devices Required</th>
+           <th${thC}>Devices Received</th>
+           <th${thC}>Pending</th>
+           <th${thC}>Devices installed</th>
+           <th${thC}>Installations Pending</th>
+           <th${thC}>Issues</th>
+           <th${thC}>Completed</th>
+           <th${thC}>Completion %</th>
+         </tr>
+       </thead>
+       <tbody>
+         ${tableRows || `<tr><td colspan="10" style="text-align:center;padding:12px;">No data</td></tr>`}
+         ${totalRow}
+       </tbody>
+     </table>
+   `;
 
 const issuesList = rows.filter(r => hasIssue(r.issuesIfAny));
 let issuesHTML = "";
@@ -843,109 +1089,109 @@ return String(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"
 exportDashboardPDF(){ this._pdfSimple("POS Deployment Dashboard Summary"); }
 exportProgressPDF(){ this._pdfSimple("POS Deployment Progress Report"); }
 
-  // ===== PATCH B: Wire the Reports → Export PDF dialog "Generate" button =====
-  _wireExportReportsPdfForm(){
-    if (this._pdfDialogWired) return;
-    this._pdfDialogWired = true;
+// ===== PATCH B: Wire the Reports → Export PDF dialog "Generate" button =====
+_wireExportReportsPdfForm(){
+if (this._pdfDialogWired) return;
+this._pdfDialogWired = true;
 
-    const rebindDateToggles = () => {
-      const dlg = document.querySelector('.modal, [role="dialog"], #pdf-orient-overlay');
-      if (!dlg) return;
+const rebindDateToggles = () => {
+const dlg = document.querySelector('.modal, [role="dialog"], #pdf-orient-overlay');
+if (!dlg) return;
 
-      const radios = dlg.querySelectorAll('input[name="pdf-period"], input[name*="period"]');
-      const single = dlg.querySelector('input[type="date"][data-role="single"], #pdf-single-date');
-      const rangeA = dlg.querySelector('input[type="date"][data-role="from"], #pdf-range-start');
-      const rangeB = dlg.querySelector('input[type="date"][data-role="to"],   #pdf-range-end');
+const radios = dlg.querySelectorAll('input[name="pdf-period"], input[name*="period"]');
+const single = dlg.querySelector('input[type="date"][data-role="single"], #pdf-single-date');
+const rangeA = dlg.querySelector('input[type="date"][data-role="from"], #pdf-range-start');
+const rangeB = dlg.querySelector('input[type="date"][data-role="to"],   #pdf-range-end');
 
-      const setState = () => {
-        let val = dlg.querySelector('input[name="pdf-period"]:checked')?.value
-               || dlg.querySelector('input[name*="period"]:checked')?.value
-               || 'today';
-        if (single) single.disabled = (val !== 'single');
-        if (rangeA) rangeA.disabled = (val !== 'range');
-        if (rangeB) rangeB.disabled = (val !== 'range');
-      };
-      radios.forEach(r => r.addEventListener('change', setState));
-      setState();
-    };
+const setState = () => {
+let val = dlg.querySelector('input[name="pdf-period"]:checked')?.value
+|| dlg.querySelector('input[name*="period"]:checked')?.value
+|| 'today';
+if (single) single.disabled = (val !== 'single');
+if (rangeA) rangeA.disabled = (val !== 'range');
+if (rangeB) rangeB.disabled = (val !== 'range');
+};
+radios.forEach(r => r.addEventListener('change', setState));
+setState();
+};
 
-    // Delegated click for the dialog's Generate button
-    document.addEventListener('click', (e)=>{
-      // Accept several selectors and a fallback by button text "Generate"
-      let btn = e.target.closest('#pdf-orient-generate, [data-export-pdf-generate], .export-pdf-generate-btn');
-      if (!btn){
-        const maybe = e.target.closest('button');
-        const dlg = e.target.closest('.modal, [role="dialog"], #pdf-orient-overlay');
-        if (dlg && maybe && maybe.textContent.trim().toLowerCase() === 'generate') btn = maybe;
-      }
-      if (!btn) return;
+// Delegated click for the dialog's Generate button
+document.addEventListener('click', (e)=>{
+// Accept several selectors and a fallback by button text "Generate"
+let btn = e.target.closest('#pdf-orient-generate, [data-export-pdf-generate], .export-pdf-generate-btn');
+if (!btn){
+const maybe = e.target.closest('button');
+const dlg = e.target.closest('.modal, [role="dialog"], #pdf-orient-overlay');
+if (dlg && maybe && maybe.textContent.trim().toLowerCase() === 'generate') btn = maybe;
+}
+if (!btn) return;
 
-      const dlg = btn.closest('.modal, [role="dialog"], #pdf-orient-overlay') || document;
+const dlg = btn.closest('.modal, [role="dialog"], #pdf-orient-overlay') || document;
 
-      // Orientation (prefer explicit group, otherwise any radio with these values)
-      const orientation =
-        (dlg.querySelector('input[name="pdf-orient"]:checked')?.value) ||
-        (dlg.querySelector('input[type="radio"][value="portrait"]:checked') ? 'portrait' : null) ||
-        (dlg.querySelector('input[type="radio"][value="landscape"]:checked') ? 'landscape' : null) ||
-        'landscape';
+// Orientation (prefer explicit group, otherwise any radio with these values)
+const orientation =
+(dlg.querySelector('input[name="pdf-orient"]:checked')?.value) ||
+(dlg.querySelector('input[type="radio"][value="portrait"]:checked') ? 'portrait' : null) ||
+(dlg.querySelector('input[type="radio"][value="landscape"]:checked') ? 'landscape' : null) ||
+'landscape';
 
-      // Period: prefer radios; otherwise infer from enabled date inputs
-      let mode = (dlg.querySelector('input[name="pdf-period"]:checked')?.value) ||
-                 (dlg.querySelector('input[name*="period"]:checked')?.value) || null;
+// Period: prefer radios; otherwise infer from enabled date inputs
+let mode = (dlg.querySelector('input[name="pdf-period"]:checked')?.value) ||
+(dlg.querySelector('input[name*="period"]:checked')?.value) || null;
 
-      const enabledDates = [...dlg.querySelectorAll('input[type="date"]')].filter(i=>!i.disabled);
-      if (!mode){
-        if (enabledDates.length >= 2) mode = 'range';
-        else if (enabledDates.length === 1) mode = 'single';
-        else mode = 'today';
-      }
+const enabledDates = [...dlg.querySelectorAll('input[type="date"]')].filter(i=>!i.disabled);
+if (!mode){
+if (enabledDates.length >= 2) mode = 'range';
+else if (enabledDates.length === 1) mode = 'single';
+else mode = 'today';
+}
 
-      // Find ISO dates
-      const pick = (sel) => dlg.querySelector(sel)?.value || '';
-      const singleISO = pick('#pdf-single-date') || (enabledDates[0]?.value || '');
-      const rangeStartISO = pick('#pdf-range-start') || (enabledDates[0]?.value || '');
-      const rangeEndISO   = pick('#pdf-range-end')   || (enabledDates[1]?.value || '');
+// Find ISO dates
+const pick = (sel) => dlg.querySelector(sel)?.value || '';
+const singleISO = pick('#pdf-single-date') || (enabledDates[0]?.value || '');
+const rangeStartISO = pick('#pdf-range-start') || (enabledDates[0]?.value || '');
+const rangeEndISO   = pick('#pdf-range-end')   || (enabledDates[1]?.value || '');
 
-      // Convert ISO→DMY for exportReportsPDF
-      const isoToDMY = (iso) => {
-        if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
-        const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`;
-      };
+// Convert ISO→DMY for exportReportsPDF
+const isoToDMY = (iso) => {
+if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`;
+};
 
-      const opts = {
-        orientation,
-        mode,
-        singleDMY:     mode==='single' ? isoToDMY(singleISO)     : null,
-        rangeStartDMY: mode==='range'  ? isoToDMY(rangeStartISO) : null,
-        rangeEndDMY:   mode==='range'  ? isoToDMY(rangeEndISO)   : null
-      };
+const opts = {
+orientation,
+mode,
+singleDMY:     mode==='single' ? isoToDMY(singleISO)     : null,
+rangeStartDMY: mode==='range'  ? isoToDMY(rangeStartISO) : null,
+rangeEndDMY:   mode==='range'  ? isoToDMY(rangeEndISO)   : null
+};
 
-      // If a temporary overlay is open, close it
-      const overlay = document.getElementById('pdf-orient-overlay');
-      if (overlay) overlay.remove();
+// If a temporary overlay is open, close it
+const overlay = document.getElementById('pdf-orient-overlay');
+if (overlay) overlay.remove();
 
-      // Call the real exporter using the normalized API
-      try {
-        if (mode === 'single' && singleISO){
-          this.exportReportsPDF({ orientation, reportMode:'single', reportDate: singleISO });
-        } else if (mode === 'range' && rangeStartISO && rangeEndISO){
-          this.exportReportsPDF({ orientation, reportMode:'range', startDate: rangeStartISO, endDate: rangeEndISO });
-        } else {
-          this.exportReportsPDF({ orientation, reportMode:'all' });
-        }
-      } catch (err){
-        console.error('Export PDF failed:', err);
-        alert('Could not generate the PDF. Please try again.');
-      }
-    }, true);
+// Call the real exporter using the normalized API
+try {
+if (mode === 'single' && singleISO){
+this.exportReportsPDF({ orientation, reportMode:'single', reportDate: singleISO });
+} else if (mode === 'range' && rangeStartISO && rangeEndISO){
+this.exportReportsPDF({ orientation, reportMode:'range', startDate: rangeStartISO, endDate: rangeEndISO });
+} else {
+this.exportReportsPDF({ orientation, reportMode:'all' });
+}
+} catch (err){
+console.error('Export PDF failed:', err);
+alert('Could not generate the PDF. Please try again.');
+}
+}, true);
 
-    // Rebind toggles when the dialog opens (best effort)
-    document.addEventListener('click', (e)=>{
-      const openBtn = e.target.closest('[data-export-reports-open], #btnExportReportsPDF');
-      if (openBtn) setTimeout(rebindDateToggles, 0);
-    });
-    setTimeout(rebindDateToggles, 0);
-  }
+// Rebind toggles when the dialog opens (best effort)
+document.addEventListener('click', (e)=>{
+const openBtn = e.target.closest('[data-export-reports-open], #btnExportReportsPDF');
+if (openBtn) setTimeout(rebindDateToggles, 0);
+});
+setTimeout(rebindDateToggles, 0);
+}
 
 // ===== Enhanced Reports PDF — now supports date / date-range selection =====
 exportReportsPDF(opts){
@@ -1109,9 +1355,7 @@ startYMD = opts.startDate; endYMD = opts.endDate;
 rangeStartDMY = ymdToDMY(startYMD); rangeEndDMY = ymdToDMY(endYMD);
 devicesPeriodLabel = `from ${rangeStartDMY} to ${rangeEndDMY}`;
 } else {
-      // all
-      // keep "today" wording for backward compatibility
-      // all -> keep "today" wording for backward compatibility
+// all -> keep "today" wording for backward compatibility
 }
 
 // Aggregates (unfiltered)
@@ -1138,8 +1382,7 @@ const d = r.division || "—";
 (byDiv[d] ||= []).push(r);
 });
 
-    // Division entries (main table): alphabetical except "RMS HB Division" last
-    // Division entries (main table)
+// Division entries (main table)
 const entries = Object.entries(byDiv).sort(([a],[b])=>{
 if (a === "RMS HB Division" && b !== "RMS HB Division") return 1;
 if (b === "RMS HB Division" && a !== "RMS HB Division") return -1;
@@ -1187,7 +1430,6 @@ return sameDMY(r.dateOfReceiptOfDevice, singleDMY) && toInt(r.noOfDevicesReceive
 } else if (mode === 'range' && startYMD && endYMD){
 return inRange(r.dateOfReceiptOfDevice, startYMD, endYMD) && toInt(r.noOfDevicesReceived) > 0;
 } else {
-            // all -> today (backward compatibility)
 return normalizeToDMY(r.dateOfReceiptOfDevice) === todayDMY && toInt(r.noOfDevicesReceived) > 0;
 }
 })
@@ -1239,153 +1481,74 @@ const tableW = pageW - margin*2;
 
 // --- Auto-fit column widths (no word breaking, full-width fit) ---
 function computeAutoWidths(){
-  // Helper: longest single-word width at current font settings
-  const longestWordWidth = (text) => {
-    const s = (text ?? "").toString();
-    // allow breaks at spaces, slashes, and hyphens — but never inside a word
-    const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
-    if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
-    let w = 0;
-    for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
-    return w;
-  };
+const longestWordWidth = (text) => {
+const s = (text ?? "").toString();
+const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
+if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
+let w = 0;
+for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
+return w;
+};
 
-  // Base minimums (pt)
-  const baseMin = tableCols.map(c => c.key === 'division' ? 120 : 52);
+const baseMin = tableCols.map(c => c.key === 'division' ? 120 : 52);
 
-  // Header widths & header "no-break" minima at header font
-  doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-  const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
-  const headerNoBreakMin = tableCols.map(c => Math.ceil(longestWordWidth(c.label) + padX*2 + 4));
+doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
+const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
+const headerNoBreakMin = tableCols.map(c => Math.ceil(longestWordWidth(c.label) + padX*2 + 4));
 
-  // Content widths & "no-break" minima at body font
-  doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-  const contentW = tableCols.map(() => 0);
-  const contentNoBreakMin = tableCols.map(() => 0);
+doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
+const contentW = tableCols.map(() => 0);
+const contentNoBreakMin = tableCols.map(() => 0);
 
-  const consider = obj => {
-    tableCols.forEach((c, i) => {
-      const raw = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
-      const w   = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
-      const nb  = Math.ceil(longestWordWidth(raw) + padX*2 + 2);
-      if (w  > contentW[i])         contentW[i]         = w;
-      if (nb > contentNoBreakMin[i]) contentNoBreakMin[i] = nb;
-    });
-  };
-  divisions.forEach(consider);
-  consider(totalsRow);
+const consider = obj => {
+tableCols.forEach((c, i) => {
+const raw = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
+const w   = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
+const nb  = Math.ceil(longestWordWidth(raw) + padX*2 + 2);
+if (w  > contentW[i])          contentW[i]          = w;
+if (nb > contentNoBreakMin[i]) contentNoBreakMin[i] = nb;
+});
+};
+divisions.forEach(consider);
+consider(totalsRow);
 
-  // Final minimum per column ensures: baseMin, header no-break, content no-break
-  const minW = tableCols.map((_, i) =>
-    Math.max(baseMin[i], headerNoBreakMin[i], contentNoBreakMin[i])
-  );
+const minW = tableCols.map((_, i) =>
+Math.max(baseMin[i], headerNoBreakMin[i], contentNoBreakMin[i])
+);
 
-  // Desired width = max(header, content, min)
-  let desired = tableCols.map((_, i) => Math.max(headerW[i], contentW[i], minW[i]));
-  const totalAvail = tableW;
-  let sum = desired.reduce((a,b)=>a+b,0);
+let desired = tableCols.map((_, i) => Math.max(headerW[i], contentW[i], minW[i]));
+const totalAvail = tableW;
+let sum = desired.reduce((a,b)=>a+b,0);
 
-  // If wider than page: scale down, but never below minW
-  if (sum > totalAvail){
-    const over = sum - totalAvail;
-    // iterative shave from columns with most slack (desired - minW)
-    let tries = 0;
-    while (sum > totalAvail && tries < 500){
-      let idx = -1, slackMax = -1;
-      for (let i=0;i<desired.length;i++){
-        const slack = desired[i] - minW[i];
-        if (slack > slackMax){ slackMax = slack; idx = i; }
-      }
-      if (idx < 0) break; // cannot shrink further without breaking words
-      desired[idx] -= 1; sum -= 1; tries++;
-    }
-  }
-    // --- Auto-fit column widths (no word breaking, full-width fit) ---
-    function computeAutoWidths(){
-      const longestWordWidth = (text) => {
-        const s = (text ?? "").toString();
-        const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
-        if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
-        let w = 0;
-        for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
-        return w;
-      };
-
-  // If narrower than page: distribute leftover (bias wider-text columns)
-  if (sum < totalAvail){
-    let leftover = totalAvail - sum;
-    const priority = new Set(['division','pinst','req','rec','inst']);
-    while (leftover > 0){
-      let advanced = false;
-      for (let i=0;i<tableCols.length && leftover>0;i++){
-        if (priority.has(tableCols[i].key)) { desired[i] += 1; leftover--; advanced = true; }
-      }
-      if (!advanced){
-        for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i] += 1; leftover--; }
-      const baseMin = tableCols.map(c => c.key === 'division' ? 120 : 52);
-
-      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-      const headerW = tableCols.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
-      const headerNoBreakMin = tableCols.map(c => Math.ceil(longestWordWidth(c.label) + padX*2 + 4));
-
-      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-      const contentW = tableCols.map(() => 0);
-      const contentNoBreakMin = tableCols.map(() => 0);
-
-      const consider = obj => {
-        tableCols.forEach((c, i) => {
-          const raw = c.key === 'pct' ? `${obj[c.key]}%` : String(obj[c.key] ?? '');
-          const w   = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
-          const nb  = Math.ceil(longestWordWidth(raw) + padX*2 + 2);
-          if (w  > contentW[i])          contentW[i]          = w;
-          if (nb > contentNoBreakMin[i]) contentNoBreakMin[i] = nb;
-        });
-      };
-      divisions.forEach(consider);
-      consider(totalsRow);
-
-      const minW = tableCols.map((_, i) =>
-        Math.max(baseMin[i], headerNoBreakMin[i], contentNoBreakMin[i])
-      );
-
-      let desired = tableCols.map((_, i) => Math.max(headerW[i], contentW[i], minW[i]));
-      const totalAvail = tableW;
-      let sum = desired.reduce((a,b)=>a+b,0);
-
-      if (sum > totalAvail){
-        let tries = 0;
-        while (sum > totalAvail && tries < 500){
-          let idx = -1, slackMax = -1;
-          for (let i=0;i<desired.length;i++){
-            const slack = desired[i] - minW[i];
-            if (slack > slackMax){ slackMax = slack; idx = i; }
-          }
-          if (idx < 0) break;
-          desired[idx] -= 1; sum -= 1; tries++;
-        }
+if (sum > totalAvail){
+let tries = 0;
+while (sum > totalAvail && tries < 500){
+let idx = -1, slackMax = -1;
+for (let i=0;i<desired.length;i++){
+const slack = desired[i] - minW[i];
+if (slack > slackMax){ slackMax = slack; idx = i; }
 }
-    }
-  }
-
-  // Assign back
-  tableCols.forEach((c,i)=> c.w = desired[i]);
+if (idx < 0) break;
+desired[idx] -= 1; sum -= 1; tries++;
 }
-      if (sum < totalAvail){
-        let leftover = totalAvail - sum;
-        const priority = new Set(['division','pinst','req','rec','inst']);
-        while (leftover > 0){
-          let advanced = false;
-          for (let i=0;i<tableCols.length && leftover>0;i++){
-            if (priority.has(tableCols[i].key)) { desired[i] += 1; leftover--; advanced = true; }
-          }
-          if (!advanced){
-            for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i] += 1; leftover--; }
-          }
-        }
-      }
+}
 
-      tableCols.forEach((c,i)=> c.w = desired[i]);
-    }
+if (sum < totalAvail){
+let leftover = totalAvail - sum;
+const priority = new Set(['division','pinst','req','rec','inst']);
+while (leftover > 0){
+let advanced = false;
+for (let i=0;i<tableCols.length && leftover>0;i++){
+if (priority.has(tableCols[i].key)) { desired[i] += 1; leftover--; advanced = true; }
+}
+if (!advanced){
+for (let i=0;i<tableCols.length && leftover>0;i++){ desired[i] += 1; leftover--; }
+}
+}
+}
+
+tableCols.forEach((c,i)=> c.w = desired[i]);
+}
 
 // helpers
 function setBorder(){ doc.setDrawColor(borderGray); doc.setLineWidth(0.4); }
@@ -1406,7 +1569,6 @@ doc.setTextColor(0,0,0);
 doc.setFont('helvetica','normal'); doc.setFontSize(fontSub);
 doc.text('SBI-DOP POS Machines Deployment status', margin, y); y += 14;
 
-      // Period line
 if (mode === 'single' && singleDMY){
 doc.text(`Report for the date: ${singleDMY}`, margin, y); y += 8;
 } else if (mode === 'range' && rangeStartDMY && rangeEndDMY){
@@ -1435,10 +1597,8 @@ const rsRight = [
 String(devicesReceivedInPeriod)
 ]
 ];
-    const colGap = 260; // right column group start
-    const valOffset = 190; // value alignment width
-    const colGap = 260;
-    const valOffset = 190;
+const colGap = 260;
+const valOffset = 190;
 
 rsLeft.forEach(([k,v],i)=>{
 ensureSpace(14);
@@ -1459,7 +1619,6 @@ computeAutoWidths();
 function drawTableHeader(){
 ensureSpace(24);
 setBorder();
-      // compute header height
 doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
 const headerHeights = tableCols.map(c => {
 const lines = doc.splitTextToSize(c.label, c.w - padX*2);
@@ -1472,37 +1631,21 @@ const totalW = tableCols.reduce((s,c)=>s+c.w,0);
 doc.rect(tableX, y, totalW, headerH, 'F');
 
 // Per-cell borders + text
-      let x = tableX;  // FIX: ensure x is defined
+let x = tableX;  // FIX: ensure x is defined
 tableCols.forEach(c=>{
-  doc.rect(x, y, c.w, headerH, 'S');
-  const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-  const startY = centerBlockY(y, headerH, lines);
+doc.rect(x, y, c.w, headerH, 'S');
+const lines = doc.splitTextToSize(c.label, c.w - padX*2);
+const startY = centerBlockY(y, headerH, lines);
 
-  if (c.key === 'division') {
-    // Left-align ONLY the "Division" header
-    doc.text(lines, x + padX, startY, { align: 'left', lineHeightFactor: 1.25 });
-  } else {
-    // Center-align all other headers
-    lines.forEach((ln, i) => {
-      doc.text(ln, x + c.w / 2, startY + i * lineH, { align: 'center' });
-    });
-  }
-
-  x += c.w;
+if (c.key === 'division') {
+doc.text(lines, x + padX, startY, { align: 'left', lineHeightFactor: 1.25 });
+} else {
+lines.forEach((ln, i) => {
+doc.text(ln, x + c.w / 2, startY + i * lineH, { align: 'center' });
 });
-        doc.rect(x, y, c.w, headerH, 'S');
-        const lines = doc.splitTextToSize(c.label, c.w - padX*2);
-        const startY = centerBlockY(y, headerH, lines);
-
-        if (c.key === 'division') {
-          doc.text(lines, x + padX, startY, { align: 'left', lineHeightFactor: 1.25 });
-        } else {
-          lines.forEach((ln, i) => {
-            doc.text(ln, x + c.w / 2, startY + i * lineH, { align: 'center' });
-          });
-        }
-        x += c.w;
-      });
+}
+x += c.w;
+});
 
 y += headerH;
 }
@@ -1551,13 +1694,11 @@ divisions.forEach((r, idx) => {
 if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
 drawRow(r, idx % 2 === 1);
 });
-    // Totals row with same (darker) background as header
 if (y > pageH - margin - 30){ newPage(); drawTableHeader(); }
 drawRow(totalsRow, false, true, headerFill);
 
 // ------ Devices received <period> — Division-wise list ------
 if (periodGroups.length){
-      // Always move to a fresh page for clean layout (per your previous direction)
 newPage();
 doc.setFont('helvetica','bold'); doc.setFontSize(12);
 doc.text(`Devices received ${devicesPeriodLabel} — Division-wise`, margin, y); y += 6;
@@ -1577,128 +1718,62 @@ g.items.forEach(it => rows2.push({ division:g.division, po:it.po, n:it.n }));
 
 // Auto widths for second table (NO WORD BREAKING + full-width fit)
 const longestWordWidth2 = (text) => {
-  const s = (text ?? "").toString();
-  // allow visual breaks only at space, slash, hyphen — never inside a token
-  const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
-  if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
-  let w = 0;
-  for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
-  return w; // width WITHOUT padding; padding added below
+const s = (text ?? "").toString();
+const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
+if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
+let w = 0;
+for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
+return w;
 };
 
-// Sensible floors for a professional look
-const baseMin2 = [120, 240, 90]; // [Division, Post Office, Devices Today]
+const baseMin2 = [120, 240, 90];
 
-// Measure headers at header font
 doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
 const headW2  = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
 const headNB2 = cols2.map(c => Math.ceil(longestWordWidth2(c.label) + padX*2 + 4));
 
-// Measure content at body font
 doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
 const contentW2  = cols2.map(() => 0);
 const contentNB2 = cols2.map(() => 0);
 
 rows2.forEach(r=>{
-  cols2.forEach((c,i)=>{
-    const raw = r._group
-      ? (c.key==='division' ? `${r.division}  —  Total: ${r.total}` : '')
-      : String(r[c.key] ?? '');
-    const w  = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
-    const nb = Math.ceil(longestWordWidth2(raw) + padX*2 + 2);
-    if (w  > contentW2[i])  contentW2[i]  = w;
-    if (nb > contentNB2[i]) contentNB2[i] = nb;
-  });
+cols2.forEach((c,i)=>{
+const raw = r._group
+? (c.key==='division' ? `${r.division}  —  Total: ${r.total}` : '')
+: String(r[c.key] ?? '');
+const w  = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
+const nb = Math.ceil(longestWordWidth2(raw) + padX*2 + 2);
+if (w  > contentW2[i])  contentW2[i]  = w;
+if (nb > contentNB2[i]) contentNB2[i] = nb;
+});
 });
 
-// Final per-column minimums: never shrink below longest single word
 const min2 = cols2.map((_,i)=> Math.max(baseMin2[i], headNB2[i], contentNB2[i]));
-
-// Target widths before fitting to page
 let desired2 = cols2.map((_,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
 const tableW2 = pageW - margin*2;
 let sum2 = desired2.reduce((a,b)=>a+b,0);
 
-// If wider than page: shave from columns with slack, never below min2
 if (sum2 > tableW2){
-  let tries = 0;
-  while (sum2 > tableW2 && tries < 600){
-    let idx = -1, slackMax = -1;
-    for (let i=0;i<desired2.length;i++){
-      const slack = desired2[i] - min2[i];
-      if (slack > slackMax){ slackMax = slack; idx = i; }
-    }
-    if (idx < 0) break; // cannot shrink further without breaking words
-    desired2[idx] -= 1; sum2 -= 1; tries++;
-  }
-// If narrower: widen Post Office col first, then distribute the rest
-} else if (sum2 < tableW2){
-  let leftover = tableW2 - sum2;
-  while (leftover > 0){
-    if (leftover > 0){ desired2[1] += 1; leftover--; } // index 1 = Post Office
-    for (let i=0;i<desired2.length && leftover>0;i++){ desired2[i] += 1; leftover--; }
-  }
+let tries = 0;
+while (sum2 > tableW2 && tries < 600){
+let idx = -1, slackMax = -1;
+for (let i=0;i<desired2.length;i++){
+const slack = desired2[i] - min2[i];
+if (slack > slackMax){ slackMax = slack; idx = i; }
 }
-      const longestWordWidth2 = (text) => {
-        const s = (text ?? "").toString();
-        const tokens = s.replace(/[\/\-]/g, " ").split(/\s+/).filter(Boolean);
-        if (!tokens.length) return Math.ceil(doc.getTextWidth(s));
-        let w = 0;
-        for (const t of tokens) w = Math.max(w, Math.ceil(doc.getTextWidth(t)));
-        return w;
-      };
+if (idx < 0) break;
+desired2[idx] -= 1; sum2 -= 1; tries++;
+}
+} else if (sum2 < tableW2){
+let leftover = tableW2 - sum2;
+while (leftover > 0){
+if (leftover > 0){ desired2[1] += 1; leftover--; }
+for (let i=0;i<desired2.length && leftover>0;i++){ desired2[i] += 1; leftover--; }
+}
+}
 
-      const baseMin2 = [120, 240, 90];
-
-      doc.setFont('helvetica','bold'); doc.setFontSize(fontHead);
-      const headW2  = cols2.map(c => Math.ceil(doc.getTextWidth(c.label) + padX*2 + 4));
-      const headNB2 = cols2.map(c => Math.ceil(longestWordWidth2(c.label) + padX*2 + 4));
-
-      doc.setFont('helvetica','normal'); doc.setFontSize(fontBody);
-      const contentW2  = cols2.map(() => 0);
-      const contentNB2 = cols2.map(() => 0);
-
-      rows2.forEach(r=>{
-        cols2.forEach((c,i)=>{
-          const raw = r._group
-            ? (c.key==='division' ? `${r.division}  —  Total: ${r.total}` : '')
-            : String(r[c.key] ?? '');
-          const w  = Math.ceil(doc.getTextWidth(raw) + padX*2 + 2);
-          const nb = Math.ceil(longestWordWidth2(raw) + padX*2 + 2);
-          if (w  > contentW2[i])  contentW2[i]  = w;
-          if (nb > contentNB2[i]) contentNB2[i] = nb;
-        });
-      });
-
-      const min2 = cols2.map((_,i)=> Math.max(baseMin2[i], headNB2[i], contentNB2[i]));
-      let desired2 = cols2.map((_,i)=> Math.max(min2[i], headW2[i], contentW2[i]));
-      const tableW2 = pageW - margin*2;
-      let sum2 = desired2.reduce((a,b)=>a+b,0);
-
-      if (sum2 > tableW2){
-        let tries = 0;
-        while (sum2 > tableW2 && tries < 600){
-          let idx = -1, slackMax = -1;
-          for (let i=0;i<desired2.length;i++){
-            const slack = desired2[i] - min2[i];
-            if (slack > slackMax){ slackMax = slack; idx = i; }
-          }
-          if (idx < 0) break;
-          desired2[idx] -= 1; sum2 -= 1; tries++;
-        }
-      } else if (sum2 < tableW2){
-        let leftover = tableW2 - sum2;
-        while (leftover > 0){
-          if (leftover > 0){ desired2[1] += 1; leftover--; }
-          for (let i=0;i<desired2.length && leftover>0;i++){ desired2[i] += 1; leftover--; }
-        }
-      }
-
-// Commit widths
 cols2.forEach((c,i)=> c.w = desired2[i]);
-      cols2.forEach((c,i)=> c.w = desired2[i]);
 
-      
 // Draw header
 const drawHeader2 = ()=>{
 ensureSpace(22);
@@ -1749,40 +1824,22 @@ y += h;
 });
 }
 
-    // Footer: page numbers + date on every page (always generation date in DD/MM/YYYY)
+// Footer: page numbers + generation date (DD/MM/YYYY)
 const pages = doc.getNumberOfPages();
 for (let i = 1; i <= pages; i++) {
-  doc.setPage(i);
-  doc.setFont('helvetica','normal');
-  doc.setFontSize(9);
+doc.setPage(i);
+doc.setFont('helvetica','normal');
+doc.setFontSize(9);
 
-  // Force generation date (DD/MM/YYYY) regardless of selected report date/range
-  const _gen = new Date();
-  const _dd  = String(_gen.getDate()).padStart(2, '0');
-  const _mm  = String(_gen.getMonth() + 1).padStart(2, '0');
-  const _yy  = _gen.getFullYear();
-  const generatedOnDMY = `${_dd}/${_mm}/${_yy}`;
+const _gen = new Date();
+const _dd  = String(_gen.getDate()).padStart(2, '0');
+const _mm  = String(_gen.getMonth() + 1).padStart(2, '0');
+const _yy  = _gen.getFullYear();
+const generatedOnDMY = `${_dd}/${_mm}/${_yy}`;
 
-  doc.text(`Generated on ${generatedOnDMY}`, pageW - margin, pageH - 12, { align: 'right' });
-  doc.text(`Page ${i} / ${pages}`,        margin,        pageH - 12, { align: 'left'  });
+doc.text(`Generated on ${generatedOnDMY}`, pageW - margin, pageH - 12, { align: 'right' });
+doc.text(`Page ${i} / ${pages}`,        margin,        pageH - 12, { align: 'left'  });
 }
-
-    // Footer: page numbers + generation date (DD/MM/YYYY)
-    const pages = doc.getNumberOfPages();
-    for (let i = 1; i <= pages; i++) {
-      doc.setPage(i);
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(9);
-
-      const _gen = new Date();
-      const _dd  = String(_gen.getDate()).padStart(2, '0');
-      const _mm  = String(_gen.getMonth() + 1).padStart(2, '0');
-      const _yy  = _gen.getFullYear();
-      const generatedOnDMY = `${_dd}/${_mm}/${_yy}`;
-
-      doc.text(`Generated on ${generatedOnDMY}`, pageW - margin, pageH - 12, { align: 'right' });
-      doc.text(`Page ${i} / ${pages}`,        margin,        pageH - 12, { align: 'left'  });
-    }
 
 const outStamp = new Date().toISOString().slice(0,10);
 const suffix = (mode==='single' && opts.reportDate)
@@ -1797,19 +1854,12 @@ const { jsPDF } = window.jspdf; const doc=new jsPDF();
 doc.setFontSize(20); doc.text(title,20,30);
 doc.setFontSize(12);
 {
-  const d = new Date();
-  const dd = String(d.getDate()).padStart(2,'0');
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const yy = d.getFullYear();
-  doc.text(`Generated on: ${dd}/${mm}/${yy}`, 20, 45);
+const d = new Date();
+const dd = String(d.getDate()).padStart(2,'0');
+const mm = String(d.getMonth()+1).padStart(2,'0');
+const yy = d.getFullYear();
+doc.text(`Generated on: ${dd}/${mm}/${yy}`, 20, 45);
 }
-    {
-      const d = new Date();
-      const dd = String(d.getDate()).padStart(2,'0');
-      const mm = String(d.getMonth()+1).padStart(2,'0');
-      const yy = d.getFullYear();
-      doc.text(`Generated on: ${dd}/${mm}/${yy}`, 20, 45);
-    }
 doc.text(`Generated by: ${this.currentUser||"User"}`,20,55);
 doc.save(`${title.replace(/\s+/g,'-')}-${new Date().toISOString().slice(0,10)}.pdf`);
 }
@@ -1864,10 +1914,7 @@ const sample=[1,'Sample Division','Sample Post Office','SAMPLE001','Head Post Of
 const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet([header,sample]); XLSX.utils.book_append_sheet(wb,ws,"POS Template"); XLSX.writeFile(wb,"POS_Deployment_Template.xlsx");
 }
 
-  // Backward compatible: if called with no opts, exports ALL data (unchanged behavior).
-  // If called with { reportMode:'single', reportDate:'YYYY-MM-DD' } or { reportMode:'range', startDate:'YYYY-MM-DD', endDate:'YYYY-MM-DD' }
-  // it filters rows by dateOfReceiptOfDevice accordingly.
-  // Backward compatible: export all data unless date filters are supplied
+// Backward compatible: export all data unless date filters are supplied
 exportCurrentData(opts){
 if (typeof XLSX==='undefined'){ alert("Excel library not loaded."); return; }
 const header=['Sl.No.','Division','POST OFFICE NAME','Post Office ID','Office Type','NAME OF CONTACT PERSON AT THE LOCATION','CONTACT PERSON NO.','ALT CONTACT PERSON NO.','CONTACT EMAIL ID','LOCATION ADDRESS','LOCATION','CITY','STATE','PINCODE','NUMBER OF POS TO BE DEPLOYED','TYPE OF POS TERMINAL','Date of receipt of device','No of devices received','Serial No','Installation status','Functionality / Working status of POS machines','Issues if any'];

@@ -8,7 +8,7 @@ class AdvancedPOSTracker {
     this.currentLocationId = null;
     this.nextLocationId = 1;
     this.importData = [];
-    this.users = ["KARNA", "NKR", "SKR", "BGR", "SBI_DOP", "admin", "admin1"];
+    this.users = ["KARNA", "NKR", "SKR", "BGR", "SBI_DOP", "NKRO", "admin1", "superadmin1"];
     this.storageKey = "advancedPOSTrackerData";
 
     // ---- Office wise details (scoped state) ----
@@ -700,7 +700,7 @@ class AdvancedPOSTracker {
             <th${thC}>Pending</th>
             <th${thC}>Devices installed</th>
             <th${thC}>Installations Pending</th>
-            <th${thC}>Issues</th>
+            <th${thC}>Offices with Issues</th>
             <th${thC}>Completed</th>
             <th${thC}>Completion %</th>
           </tr>
@@ -2252,31 +2252,38 @@ PLOYED",
 }
 
 // Make tracker available & boot on load
+// ---- boot the app ----
 window.tracker = new AdvancedPOSTracker();
 window.addEventListener("load", () => tracker.init());
 
-// ---------------------------------------------------------------
-// Tiny global wrappers so existing onclicks still work
-// (Use these if your HTML calls the functions without `tracker.` prefix.)
-// ---------------------------------------------------------------
+// ---- global wrappers for inline onclick=... in the HTML ----
 window.showTab = (evt, tab) => tracker.showTab(evt, tab);
+
 window.filterLocations = () => tracker.filterLocations();
-window.filterProgress = () => tracker.filterProgress();
-window.filterProgressByDivision = () => tracker.filterProgressByDivision();
 window.updateFilters = () => tracker.updateFilters();
+
+window.displayProgress = () => tracker.displayProgress();
+window.filterProgress = () => tracker.filterProgress();
 window.updateProgressFilters = () => tracker.updateProgressFilters();
+window.filterProgressByDivision = () => tracker.filterProgressByDivision();
+
 window.showLocationForm = () => tracker.showLocationForm();
 window.closeLocationModal = () => tracker.closeLocationModal();
-window.exportDashboardPDF = () => tracker._pdfSimple("POS Deployment Dashboard Summary");
-window.exportProgressPDF = () => tracker._pdfSimple("POS Deployment Progress Report");
-window.exportReportsPDF = () => tracker.exportReportsPDF(); // opens the dialog
-window.exportToExcel = () => tracker.exportToExcel();
-window.downloadTemplate = () => tracker.downloadTemplate();
-window.showImportModal = () => tracker.showImportModal();
-window.closeImportModal = () => tracker.closeImportModal();
-window.confirmImport = () => tracker.confirmImport();
-window.cancelImport = () => tracker.cancelImport();
-window.createBackup = () => tracker.createBackup();
-window.restoreBackup = () => tracker.restoreBackup();
 window.handleExcelImport = (e) => tracker.handleExcelImport(e);
 window.handleBackupRestore = (e) => tracker.handleBackupRestore(e);
+
+window.exportDashboardPDF = () => tracker.exportDashboardPDF();
+window.exportProgressPDF  = () => tracker.exportProgressPDF();
+window.exportReportsPDF   = () => tracker.exportReportsPDF();  // opens the dialog
+
+window.downloadTemplate = () => tracker.downloadTemplate();
+window.exportToExcel    = () => tracker.exportCurrentData();    // keep legacy behavior
+window.exportDataWithDialog = () => tracker.exportDataWithDialog?.();
+
+window.showImportModal   = () => tracker.showImportModal();
+window.closeImportModal  = () => tracker.closeImportModal();
+window.confirmImport     = () => tracker.confirmImport();
+window.cancelImport      = () => tracker.cancelImport();
+
+window.createBackup = () => tracker.createBackup();
+window.restoreBackup = () => tracker.restoreBackup();

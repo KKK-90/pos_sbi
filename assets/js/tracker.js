@@ -947,7 +947,7 @@ class AdvancedPOSTracker {
                 <input type="radio" name="pdf-period" value="all" checked> Today
               </label>
               <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
-                <input type="radio" name="pdf-period" value="single"> Single date:
+                <input type="radio" name="pdf-period" value="single"> Date:
                 <input id="pdf-date" type="date" value="${todayYMD}" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid #dfe4ea;border-radius:6px;">
               </label>
               <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
